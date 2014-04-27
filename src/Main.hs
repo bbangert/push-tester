@@ -44,6 +44,7 @@ instance ToJSON ChannelUpdate where
 instance FromJSON ChannelUpdate where
     parseJSON = genericParseJSON $ defaultOptions { fieldLabelModifier = drop 3 }
 
+-- Make an empty message with the default Uaid
 mkMessage :: Message
 mkMessage = Message "" (Just defaultUaid) Nothing Nothing Nothing Nothing Nothing
 
