@@ -57,11 +57,7 @@ receiveMessage :: WS.ClientApp Message
 receiveMessage conn = do
     d <- WS.receiveData conn
     liftIO $ BL.putStrLn $ BL.append "<<< Recv'd:: " d
-    case eitherDecode d of
-        Left e -> do
-            liftIO $ putStrLn $ "Error decoding: " ++ e
-            fail e
-        Right x -> return x
+    either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
 sendHello :: WS.ClientApp ()
 sendHello conn = do
