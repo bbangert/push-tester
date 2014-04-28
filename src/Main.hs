@@ -5,14 +5,13 @@ module Main
     ( main
     ) where
 
-
 --------------------------------------------------------------------------------
 import           Control.Concurrent   (forkIO)
 import           Control.Exception    (assert)
 import           Control.Monad        (void)
 import           Control.Monad.Trans  (liftIO)
-import           Data.Aeson           (FromJSON, ToJSON, eitherDecode,
-                                       encode, genericParseJSON, genericToJSON,
+import           Data.Aeson           (FromJSON, ToJSON, eitherDecode, encode,
+                                       genericParseJSON, genericToJSON,
                                        parseJSON, toJSON)
 import           Data.Aeson.Types     (defaultOptions, fieldLabelModifier,
                                        omitNothingFields)
