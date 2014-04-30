@@ -36,6 +36,7 @@ Test-suite pushclient-tests
   Hs-source-dirs: src tests
   Main-is:        TestSuite.hs
   Ghc-options:    -Wall
+  default-language:    Haskell2010
 
   Build-depends:
     HUnit                      >= 1.2 && < 1.3,

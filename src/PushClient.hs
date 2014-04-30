@@ -66,7 +66,12 @@ receiveMessage conn = do
     either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
-sendReceiveMessage msg conn = WS.sendTextData conn (encode msg) >> receiveMessage conn
+sendReceiveMessage msg conn = do
+  let eMsg = encode msg
+  liftIO $ BL.putStrLn $ BL.append ">>> Sending:: " eMsg
+  WS.sendTextData conn eMsg 
+  rMsg <- receiveMessage conn
+  return rMsg
 
 -- sendHello :: WS.ClientApp ()
 -- sendHello conn = do
