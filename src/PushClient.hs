@@ -1,8 +1,14 @@
 --------------------------------------------------------------------------------
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Main
-    ( main
+module PushClient
+    ( mkMessage
+    , defaultUaid
+    , defaultChannelID
+    , receiveMessage
+    , sendReceiveMessage
+    , Message (..)
+    , ChannelUpdate (..)
     ) where
 
 --------------------------------------------------------------------------------
@@ -45,7 +51,7 @@ instance FromJSON ChannelUpdate where
 
 -- Make an empty message with the default Uaid
 mkMessage :: Message
-mkMessage = Message "" (Just defaultUaid) Nothing Nothing Nothing Nothing Nothing
+mkMessage = Message "" Nothing Nothing Nothing Nothing Nothing Nothing
 
 defaultUaid :: Text
 defaultUaid = "decafbad-0000-0000-0000-000000000000"
@@ -59,64 +65,65 @@ receiveMessage conn = do
     liftIO $ BL.putStrLn $ BL.append "<<< Recv'd:: " d
     either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
-sendHello :: WS.ClientApp ()
-sendHello conn = do
-    liftIO $ putStrLn ">>> Sending 'hello'"
-    let helloMsg = encode $ mkMessage { messageType="hello", channelIDs=Just [] }
-    WS.sendTextData conn helloMsg
-    msg <- receiveMessage conn
-    assert (uaid msg == Just defaultUaid) $ return ()
+sendReceiveMessage :: Message -> WS.ClientApp Message
+sendReceiveMessage msg conn = WS.sendTextData conn (encode msg) >> receiveMessage conn
 
-registerChid :: WS.ClientApp String
-registerChid conn = do
-    liftIO $ putStrLn ">>> Registering channel"
-    let regMsg = encode $ mkMessage { messageType="register", channelID=Just defaultChannelID }
-    WS.sendTextData conn regMsg
-    msg <- receiveMessage conn
-    assert (channelID msg == Just defaultChannelID)
-           (return . fromJust $ pushEndpoint msg)
-
-readUpdateNotification :: WS.ClientApp ()
-readUpdateNotification conn = do
-    msg <- receiveMessage conn
-    assert (messageType msg == "notification") (return ())
-    let Just chUpdates = updates msg
-    assert (length chUpdates == 1) $ do
-        liftIO $ putStrLn "SUCCESS!!! Exiting..."
-        return ()
-
-unregisterChid :: WS.ClientApp ()
-unregisterChid conn = do
-    liftIO $ putStrLn ">>> Unregistering channel"
-    let unregMsg = encode $ mkMessage { messageType="unregister", channelID=Just defaultChannelID }
-    WS.sendTextData conn unregMsg
-    msg <- receiveMessage conn
-    assert (status msg == Just 200 && messageType msg == "unregister") (return ())
-
---------------------------------------------------------------------------------
-app :: WS.ClientApp ()
-app conn = do
-    putStrLn "Connected!"
-    sendHello conn
-
-    -- Register our channelID and get the endpoint
-    endpoint <- registerChid conn
-
-    -- Send a notification in
-    forkIO $ void $ put endpoint ("version=" :: BL.ByteString)
-
-    -- Read the notification
-    readUpdateNotification conn
-
-    -- Unregister for the channel
-    unregisterChid conn
-
-    WS.sendClose conn ("Bye!" :: Text)
-    liftIO $ putStrLn "Smoke test was successful"
+-- sendHello :: WS.ClientApp ()
+-- sendHello conn = do
+--     liftIO $ putStrLn ">>> Sending 'hello'"
+--     let helloMsg = mkMessage { messageType="hello", channelIDs=Just [] }
+--     msg <- sendReceiveMessage helloMsg conn
+--     assert (uaid msg == Just defaultUaid) $ return ()
+--
+-- registerChid :: WS.ClientApp String
+-- registerChid conn = do
+--     liftIO $ putStrLn ">>> Registering channel"
+--     let regMsg = mkMessage { messageType="register", channelID=Just defaultChannelID }
+--     msg <- sendReceiveMessage regMsg conn
+--     assert (channelID msg == Just defaultChannelID)
+--            (return . fromJust $ pushEndpoint msg)
+--
+-- readUpdateNotification :: WS.ClientApp ()
+-- readUpdateNotification conn = do
+--     msg <- receiveMessage conn
+--     assert (messageType msg == "notification") (return ())
+--     let Just chUpdates = updates msg
+--     assert (length chUpdates == 1) $ do
+--         liftIO $ putStrLn "SUCCESS!!! Exiting..."
+--         return ()
+--
+-- unregisterChid :: WS.ClientApp ()
+-- unregisterChid conn = do
+--     liftIO $ putStrLn ">>> Unregistering channel"
+--     let unregMsg = encode $ mkMessage { messageType="unregister", channelID=Just defaultChannelID }
+--     WS.sendTextData conn unregMsg
+--     msg <- receiveMessage conn
+--     assert (status msg == Just 200 && messageType msg == "unregister") (return ())
 
 --------------------------------------------------------------------------------
-main :: IO ()
-main = WS.runClientWith
-            "localhost" 8080 "/"
-            WS.defaultConnectionOptions
-            [("Origin", "localhost:8080")] app
+-- app :: WS.ClientApp ()
+-- app conn = do
+--     putStrLn "Connected!"
+--     sendHello conn
+--
+--     -- Register our channelID and get the endpoint
+--     endpoint <- registerChid conn
+--
+--     -- Send a notification in
+--     forkIO $ void $ put endpoint ("version=" :: BL.ByteString)
+--
+--     -- Read the notification
+--     readUpdateNotification conn
+--
+--     -- Unregister for the channel
+--     unregisterChid conn
+--
+--     WS.sendClose conn ("Bye!" :: Text)
+--     liftIO $ putStrLn "Smoke test was successful"
+--
+-- --------------------------------------------------------------------------------
+-- main :: IO ()
+-- main = WS.runClientWith
+--             "localhost" 8080 "/"
+--             WS.defaultConnectionOptions
+--             [("Origin", "localhost:8080")] app

@@ -8,8 +8,13 @@ category:            Network
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable push-test
-  main-is:             Main.hs
+Library
+  Hs-source-dirs: src
+  Ghc-options:    -Wall
+
+  Exposed-modules:
+    PushClient
+
   build-depends:
             base            >= 4.6  && <4.7
           , websockets      >= 0.8.2.1
@@ -25,3 +30,26 @@ executable push-test
 
   -- Force build with -O0 for assertions to run
   ghc-options: -O0 -Wall -threaded
+
+Test-suite pushclient-tests
+  Type:           exitcode-stdio-1.0
+  Hs-source-dirs: src tests
+  Main-is:        TestSuite.hs
+  Ghc-options:    -Wall
+
+  Build-depends:
+    HUnit                      >= 1.2 && < 1.3,
+    QuickCheck                 >= 2.4 && < 2.8,
+    test-framework             >= 0.4 && < 0.9,
+    test-framework-hunit       >= 0.2 && < 0.4,
+    test-framework-quickcheck2 >= 0.2 && < 0.4,
+    -- Copied from regular dependencies...
+            base            >= 4.6  && <4.7
+          , websockets      >= 0.8.2.1
+          , text            >= 0.11.3.1
+          , mtl             >= 2.1.2
+          , aeson           >= 0.7.0.3
+          , containers      >= 0.5.0.0
+          , bytestring      >= 0.10.0.2
+          , lens            >= 4.1.2
+          , wreq            >= 0.1.0.1
