@@ -19,9 +19,6 @@ instance Arbitrary HelloMessage where
     arbUaid <- fromString <$> uaidGen
     return mkMessage {messageType="hello", uaid=Just arbUaid, channelIDs=Just []}
 
-instance Arbitrary ChannelUpdate where
-  arbitrary = ChannelUpdate <$> arbitrary <*> arbitrary
-
 uaidGen :: Gen String
 uaidGen = listOf1 hexChar
 
@@ -29,4 +26,4 @@ hexChar :: Gen Char
 hexChar = (elements (['A'..'F'] ++ ['a'..'f'] ++ ['0'..'9'] ++ "-"))
 
 randomMessageType :: Gen String
-randomMessageType = oneof [return "hello", return "register", return "unregister", return "ping"]
+randomMessageType = elements ["hello", "register", "unregister", "ping"]

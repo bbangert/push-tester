@@ -22,7 +22,8 @@ import           Util
 tests :: Test
 tests = testGroup "PushTests"
   [ testCase "hello server" testHello
-  , testProperty "hello prop" prop_hello ]
+  , testProperty "hello prop" prop_hello
+  ]
 
 testHello :: Assertion
 testHello = withPushServer $ \conn -> do
@@ -33,7 +34,7 @@ testHello = withPushServer $ \conn -> do
 
 prop_hello :: HelloMessage -> Property
 prop_hello msg = monadicIO $ do
-  rmsg <- run $ withPushServer $ \conn -> sendReceiveMessage msg conn
+  rmsg <- run $ withPushServer $ sendReceiveMessage msg
   assert $ uaid rmsg == uaid msg
   assert $ status rmsg == Just 200
 
