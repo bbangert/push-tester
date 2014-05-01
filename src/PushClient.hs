@@ -3,8 +3,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module PushClient
     ( mkMessage
-    , defaultUaid
-    , defaultChannelID
     , receiveMessage
     , sendReceiveMessage
     , Message (..)
@@ -53,12 +51,6 @@ instance FromJSON ChannelUpdate where
 mkMessage :: Message
 mkMessage = Message "" Nothing Nothing Nothing Nothing Nothing Nothing
 
-defaultUaid :: Text
-defaultUaid = "decafbad-0000-0000-0000-000000000000"
-
-defaultChannelID :: Text
-defaultChannelID = "deadbeef-0000-0000-0000-000000000000"
-
 receiveMessage :: WS.ClientApp Message
 receiveMessage conn = do
     d <- WS.receiveData conn
@@ -69,9 +61,8 @@ sendReceiveMessage :: Message -> WS.ClientApp Message
 sendReceiveMessage msg conn = do
   let eMsg = encode msg
   liftIO $ BL.putStrLn $ BL.append ">>> Sending:: " eMsg
-  WS.sendTextData conn eMsg 
-  rMsg <- receiveMessage conn
-  return rMsg
+  WS.sendTextData conn eMsg
+  receiveMessage conn
 
 -- sendHello :: WS.ClientApp ()
 -- sendHello conn = do

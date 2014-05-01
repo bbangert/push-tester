@@ -21,16 +21,8 @@ import           Util
 
 tests :: Test
 tests = testGroup "PushTests"
-  [ testCase "hello server" testHello
-  , testProperty "hello prop" prop_hello
+  [ testProperty "hello prop" prop_hello
   ]
-
-testHello :: Assertion
-testHello = withPushServer $ \conn -> do
-  let helloMsg = mkMessage { messageType="hello", uaid=Just defaultUaid, channelIDs=Just [] }
-  msg <- sendReceiveMessage helloMsg conn
-  uaid msg @=? Just defaultUaid
-  status msg @=? Just 200
 
 prop_hello :: HelloMessage -> Property
 prop_hello msg = monadicIO $ do
