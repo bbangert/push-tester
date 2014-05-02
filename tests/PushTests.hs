@@ -14,14 +14,13 @@ import           Test.QuickCheck                      (Property,
                                                        (==>))
 import           Test.QuickCheck.Monadic              (assert, monadicIO, run)
 
-import qualified Network.WebSockets                   as WS
-
 import           PushClient
 import           Util
 
 tests :: Test
 tests = testGroup "PushTests"
   [ testProperty "hello prop" prop_hello
+  , testProperty "smoke-test" prop_smoketest
   ]
 
 prop_hello :: HelloMessage -> Property
@@ -30,8 +29,12 @@ prop_hello msg = monadicIO $ do
   assert $ uaid rmsg == uaid msg
   assert $ status rmsg == Just 200
 
-withPushServer :: WS.ClientApp a -> IO a
-withPushServer app = WS.runClientWith
-                        "localhost" 8080 "/"
-                        WS.defaultConnectionOptions
-                        [("Origin", "localhost:8080")] app
+prop_smoketest :: ValidUaid -> ValidChannelID -> Property
+prop_smoketest (ValidUaid hex) (ValidChannelID cid) =
+  [ Hello hex (Just [])
+  , Register cid
+  , SendNotification Nothing Nothing]
+  `resultsIn`
+  [ HelloSuccess hex (Just [])
+  , RegisterSuccess cid
+  , NotificationUpdate $ mkUpdates [(cid, 1)]]

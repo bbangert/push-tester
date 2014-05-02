@@ -30,18 +30,18 @@ import           Network.Wreq         (put)
 data Message = Message { messageType  :: String
                        , uaid         :: Maybe Text
                        , channelIDs   :: Maybe [String]
-                       , channelID    :: Maybe Text
+                       , channelID    :: Maybe String
                        , status       :: Maybe Int
                        , pushEndpoint :: Maybe String
                        , updates      :: Maybe [ChannelUpdate]
-                       } deriving (Show, Generic)
+                       } deriving (Show, Eq, Generic)
 instance ToJSON Message where
     toJSON = genericToJSON $ defaultOptions { omitNothingFields = True }
 instance FromJSON Message
 
 data ChannelUpdate = ChannelUpdate { cu_channelID :: String
                                    , cu_version   :: Int
-                                   } deriving (Show, Generic)
+                                   } deriving (Show, Eq, Generic)
 instance ToJSON ChannelUpdate where
     toJSON = genericToJSON $ defaultOptions { fieldLabelModifier = drop 3 }
 instance FromJSON ChannelUpdate where
