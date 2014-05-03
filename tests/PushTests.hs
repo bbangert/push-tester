@@ -4,16 +4,16 @@ module PushTests
   ( tests
   ) where
 
-import           Test.Framework                       (Test, testGroup)
-import           Test.Framework.Providers.QuickCheck2 (testProperty)
-import           Test.QuickCheck                      (Property)
+import           Test.QuickCheck       (Property)
+import           Test.Tasty            (TestTree, testGroup)
+import           Test.Tasty.QuickCheck as QC
 
 import           Util
 
-tests :: Test
-tests = testGroup "PushTests"
-  [ testProperty "hello prop" prop_hello
-  , testProperty "smoke-test" prop_smoketest
+tests :: TestTree
+tests = testGroup "Tests"
+  [ QC.testProperty "hello prop" prop_hello
+  , QC.testProperty "smoke-test" prop_smoketest
   ]
 
 prop_hello :: AnyUaid -> Property

@@ -49,12 +49,12 @@ mkMessage = Message "" Nothing Nothing Nothing Nothing Nothing Nothing
 receiveMessage :: WS.ClientApp Message
 receiveMessage conn = do
     d <- WS.receiveData conn
-    liftIO $ BL.putStrLn $ BL.append "<<< Recv'd:: " d
+    -- liftIO $ BL.putStrLn $ BL.append "<<< Recv'd:: " d
     either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
 sendReceiveMessage msg conn = do
   let eMsg = encode msg
-  liftIO $ BL.putStrLn $ BL.append ">>> Sending:: " eMsg
+  -- liftIO $ BL.putStrLn $ BL.append ">>> Sending:: " eMsg
   WS.sendTextData conn eMsg
   receiveMessage conn

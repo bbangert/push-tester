@@ -1,8 +1,6 @@
-import           Test.Framework (defaultMain)
+import           Test.Tasty (defaultMain)
 
 import qualified PushTests
 
 main :: IO ()
-main = defaultMain
-    [ PushTests.tests
-    ]
+main = defaultMain PushTests.tests

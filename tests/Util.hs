@@ -66,8 +66,6 @@ resultsIn :: [(Action, Result)] -> Property
 resultsIn lst = monadicIO $ do
   let (actions, results) = unzip lst
   results' <- run $ withPushServer $ perform [] actions
-  run $ print results
-  run $ print results'
   assert $ results == results'
 
 perform :: [String] -> [Action] -> WS.ClientApp [Result]
@@ -82,18 +80,17 @@ perform eps (a:as) conn =
       | null eps -> liftM2 (:) (return $ BadRequest noEndpoints) (perform eps as conn)
       | otherwise -> do
         let (endpoint:es) = eps
-        send endpoint $ serializeVersion ver
+        send endpoint ver
         liftM2 (:) (parseResult <$> receiveMessage conn) (perform es as conn)
-    SendNotification (Just endpoint) ver -> do
-      send endpoint $ serializeVersion ver
+    SendNotification (Just endpoint) ver -> send endpoint ver >>
       liftM2 (:) (parseResult <$> receiveMessage conn) (perform eps as conn)
     _ -> performIt
   where
     performIt = liftM2 (:) (parseResult <$> sendReceiveMessage (newMsg a) conn)
                            (perform eps as conn)
 
-send :: String -> BL.ByteString -> IO ()
-send endpoint version = void $ forkIO $ void $ put endpoint version
+send :: String -> Version -> IO ()
+send ep ver = void $ forkIO $ void $ put ep $ serializeVersion ver
 
 noEndpoints :: String
 noEndpoints = "No endpoint supplied, and no prior channelID register call"
