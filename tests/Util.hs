@@ -13,7 +13,7 @@ module Util
 
 import           Control.Applicative     ((<$>))
 import           Control.Concurrent      (forkIO)
-import           Control.Monad           (void, liftM2)
+import           Control.Monad           (liftM2, void)
 import qualified Data.ByteString.Lazy    as BL
 import           Data.Maybe              (fromJust)
 import           Data.String             (fromString)
@@ -84,10 +84,10 @@ perform eps (a:as) conn =
         liftM2 (:) (parseResult <$> receiveMessage conn) (perform es as conn)
     SendNotification (Just endpoint) ver -> send endpoint ver >>
       liftM2 (:) (parseResult <$> receiveMessage conn) (perform eps as conn)
-    _ -> performIt
+    _ -> go
   where
-    performIt = liftM2 (:) (parseResult <$> sendReceiveMessage (newMsg a) conn)
-                           (perform eps as conn)
+    go = liftM2 (:) (parseResult <$> sendReceiveMessage (newMsg a) conn)
+                    (perform eps as conn)
 
 send :: String -> Version -> IO ()
 send ep ver = void $ forkIO $ void $ put ep $ serializeVersion ver

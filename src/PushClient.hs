@@ -10,13 +10,11 @@ module PushClient
     ) where
 
 --------------------------------------------------------------------------------
-import           Control.Monad.Trans  (liftIO)
 import           Data.Aeson           (FromJSON, ToJSON, eitherDecode, encode,
                                        genericParseJSON, genericToJSON,
                                        parseJSON, toJSON)
 import           Data.Aeson.Types     (defaultOptions, fieldLabelModifier,
                                        omitNothingFields)
-import qualified Data.ByteString.Lazy as BL
 import           Data.Text            (Text)
 import           GHC.Generics
 import qualified Network.WebSockets   as WS
@@ -49,12 +47,10 @@ mkMessage = Message "" Nothing Nothing Nothing Nothing Nothing Nothing
 receiveMessage :: WS.ClientApp Message
 receiveMessage conn = do
     d <- WS.receiveData conn
-    -- liftIO $ BL.putStrLn $ BL.append "<<< Recv'd:: " d
     either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
 sendReceiveMessage msg conn = do
   let eMsg = encode msg
-  -- liftIO $ BL.putStrLn $ BL.append ">>> Sending:: " eMsg
   WS.sendTextData conn eMsg
   receiveMessage conn
