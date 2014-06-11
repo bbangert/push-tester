@@ -16,7 +16,7 @@ Library
     PushClient
 
   build-depends:
-            base            >= 4.6  && <4.7
+            base            >= 4.6  && <4.9
           , websockets      >= 0.8.2.1
           , text            >= 0.11.3.1
           , mtl             >= 2.1.2
@@ -44,7 +44,7 @@ Test-suite pushclient-tests
     tasty                      >= 0.1,
     tasty-quickcheck           >= 0.1,
     -- Copied from regular dependencies...
-            base            >= 4.6  && <4.7
+            base            >= 4.6  && <4.9
           , websockets      >= 0.8.2.1
           , text            >= 0.11.3.1
           , mtl             >= 2.1.2
