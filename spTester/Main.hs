@@ -3,6 +3,7 @@
 
 module Main where
 
+import           Control.Applicative   ((<$>))
 import           Control.Concurrent    (forkIO, runInUnboundThread, threadDelay)
 import qualified Control.Exception     as E
 import           Control.Monad         (forever, replicateM_, void)
@@ -18,7 +19,7 @@ import           Test.QuickCheck.Gen   (Gen, generate)
 import           Text.Printf           (printf)
 
 import           SimpleTest.Interact
-import           SimpleTest.Util       (ValidChannelID(..))
+import           SimpleTest.Util       (ValidChannelID (..))
 
 data ClientTracker = ClientTracker
     { attempting :: IORef Int
@@ -40,8 +41,8 @@ watcher (ClientTracker att conns m) spawn = forever $ do
     threadDelay (5*1000000)
     count <- readIORef conns
     attempts <- readIORef att
-    printf "Clients Connected: %s \tAttempting: %s" (show count) (show attempts)
-    let spawnCount = m - attempts
+    printf "Clients Connected: %s\n" (show count)
+    let spawnCount = m - count
     incRef spawnCount att
     replicateM_ spawnCount spawn
 
@@ -63,12 +64,12 @@ startWs host port tracker i =
     safeSpawn = eatExceptions $ spawn
     spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
               [("Origin", BC.concat [BC.pack host, ":", BC.pack $ show port])]
-              $ interactionTester (connected tracker) i
+              $ interactionTester tracker i
 
-interactionTester :: IORef Int -> Interaction a -> WS.ClientApp ()
-interactionTester c i conn = do
-    incRef 1 c
-    E.finally runit $ decRef c
+interactionTester :: ClientTracker -> Interaction a -> WS.ClientApp ()
+interactionTester (ClientTracker att conns _) i conn = do
+    incRef 1 conns
+    E.finally runit $ decRef conns
   where
     storage = newStorage
     config = newConfig conn
@@ -80,9 +81,17 @@ incRef v ref = void $ atomicModifyIORef' ref (\x -> (x+v, ()))
 decRef :: IORef Int -> IO ()
 decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
+{- * SimplePush Client Interactions
+
+-}
+
+-- | Basic single channel registration that sends a notification to itself
+--  every 5 seconds and never pings
 basicInteraction :: Interaction ()
 basicInteraction = do
-    helo Nothing Nothing
-    (ValidChannelID cid) <- liftIO $ generate (arbitrary :: Gen ValidChannelID)
-    register cid
-    return ()
+    helo Nothing (Just [])
+    cid <- randomChannelId
+    endpoint <- getEndpoint <$> register cid
+    forever $ do
+        sendPushNotification endpoint Nothing
+        wait 5

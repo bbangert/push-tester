@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module SimpleTest.Interact
     ( -- * Interaction type and commands
@@ -8,8 +9,13 @@ module SimpleTest.Interact
     , register
     , unregister
     , sendPushNotification
+
+      -- ** Interaction helpers
     , wait
     , randomChannelId
+
+      -- ** Interaction Message manipulation commands
+    , getEndpoint
 
       -- * Datatypes for interactions
     , Uaid
@@ -25,12 +31,14 @@ module SimpleTest.Interact
 
 import           Control.Applicative        ((<$>))
 import           Control.Concurrent         (forkIO, threadDelay)
+import qualified Control.Exception          as E
 import           Control.Monad              (void)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
 import           Control.Monad.State.Strict (StateT, get, put, runStateT)
 import           Control.Monad.Trans        (liftIO)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (fromJust)
 import           Data.String                (fromString)
 import qualified Network.WebSockets         as WS
 import qualified Network.Wreq               as Wreq
@@ -86,6 +94,9 @@ getMessage = do
     conn <- iconn <$> ask
     liftIO (receiveMessage conn) >>= return
 
+getEndpoint :: Message -> String
+getEndpoint = fromJust . pushEndpoint
+
 {-  * Basic SimplePush style interaction commands
 
 -}
@@ -129,10 +140,14 @@ randomChannelId = do
 
 -- | Send a PUT request to a notification point
 send :: String -> Version -> IO ()
-send ep ver = void $ forkIO $ void $ Wreq.put ep $ serializeVersion ver
+send ep ver =
+    void $ forkIO $ void . eatExceptions $ Wreq.put ep $ serializeVersion ver
 
 -- | Serialize the version to a bytestring for sending
 serializeVersion :: Version -> BL.ByteString
 serializeVersion Nothing = "version="
 serializeVersion (Just ver) = BL.append "version=" $ esc ver
   where esc = fromString . show
+
+eatExceptions :: IO a -> IO ()
+eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()
