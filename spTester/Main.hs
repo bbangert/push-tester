@@ -59,7 +59,7 @@ main = runInUnboundThread $ do
 
     storage <- newStorage
 
-    let spawn = startWs ip (read port) clientTracker pingDeliver storage
+    let spawn = startWs ip (read port) clientTracker channelMonster storage
     incRef maxC (attempting clientTracker)
     replicateM_ maxC spawn
     watcher clientTracker spawn
@@ -104,16 +104,16 @@ setupNewEndpoint = do
 basic :: Interaction ()
 basic = do
     helo Nothing (Just [])
-    (_, endpoint) <- setupNewEndpoint
+    ep <- setupNewEndpoint
     forever $ do
-        sendPushNotification endpoint Nothing
+        sendPushNotification ep Nothing
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
 pingDeliver :: Interaction ()
 pingDeliver = do
     helo Nothing (Just [])
-    (_, endpoint) <- setupNewEndpoint
+    endpoint <- setupNewEndpoint
     loop 0 endpoint
   where
     loop count endpoint = do
@@ -135,11 +135,11 @@ channelMonster = do
   where
     loop count eps = do
         eps' <- if (count `mod` 10 == 0) then do
-                    (_, endpoint) <- setupNewEndpoint
+                    endpoint <- setupNewEndpoint
                     return $ eps |> endpoint
                 else return eps
-        index <- randomNumber (0, S.length eps' - 1)
-        let ep = S.index eps' index
+        i <- randomNumber (0, S.length eps' - 1)
+        let ep = S.index eps' i
         sendPushNotification ep Nothing
         wait 5
         loop (count+5) eps'

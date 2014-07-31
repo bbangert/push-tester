@@ -38,7 +38,7 @@ import           Control.Concurrent         (forkIO, threadDelay)
 import qualified Control.Exception          as E
 import           Control.Monad              (void)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
-import           Control.Monad.State.Strict (StateT, get, put, runStateT)
+import           Control.Monad.State.Strict (StateT, get, runStateT)
 import           Control.Monad.Trans        (liftIO)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.Map.Strict            as Map
@@ -47,10 +47,11 @@ import           Data.String                (fromString)
 import qualified Network.WebSockets         as WS
 import qualified Network.Wreq.Session       as Wreq
 import           Test.QuickCheck            (arbitrary)
-import           Test.QuickCheck.Gen        (Gen, generate, elements, choose)
+import           Test.QuickCheck.Gen        (Gen, choose, elements, generate)
 
-import           PushClient                 (Message (..), mkMessage,
-                                             receiveMessage, sendReceiveMessage)
+import           PushClient                 (ChannelUpdate (..), Message (..),
+                                             mkMessage, receiveMessage,
+                                             sendReceiveMessage)
 
 import           SimpleTest.Types           (ChannelID, ChannelIDs, Endpoint,
                                              Uaid, Version)
@@ -102,6 +103,30 @@ getMessage = do
 getEndpoint :: Message -> String
 getEndpoint = fromJust . pushEndpoint
 
+{-  * Validity assertions to ensure operations work properly
+
+-}
+
+assert :: Show a => (Bool, a) -> String -> Interaction ()
+assert (True, _) _ = return ()
+assert (False, obj) msg = do
+    liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ (show obj)
+    fail "Abort"
+
+assertStatus200 :: Message -> Interaction ()
+assertStatus200 msg = assert (msgStatus == 200, msg) "message status not 200."
+  where
+    msgStatus = fromJust $ status msg
+
+assertEndpointMatch :: ChannelID -> Message -> Interaction ()
+assertEndpointMatch cid msg = do
+    assert (length cids == 1, cids) "channel updates is longer than 1."
+    let updateCid = cu_channelID $ head cids
+    assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch."
+  where
+    cids = fromJust $ updates msg
+    cid' = fromJust cid
+
 {-  * Basic SimplePush style interaction commands
 
 -}
@@ -114,7 +139,10 @@ helo uid cids = sendRecieve heloMsg
 
 -- | Register a channel ID with a remote server
 register :: ChannelID -> Interaction Message
-register cid = sendRecieve registerMsg
+register cid = do
+    msg <- sendRecieve registerMsg
+    assertStatus200 msg
+    return msg
   where
     registerMsg = mkMessage {messageType="register", channelID=cid}
 
@@ -124,11 +152,13 @@ unregister cid = sendRecieve unregisterMsg
   where
     unregisterMsg = mkMessage {messageType="unregister", channelID=cid}
 
-sendPushNotification :: Endpoint -> Version -> Interaction Message
-sendPushNotification endpoint ver = do
+sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
+sendPushNotification (cid, endpoint) ver = do
     sess <- stSession <$> get
     liftIO $ send sess endpoint ver
-    getMessage
+    msg <- getMessage
+    assertEndpointMatch cid msg
+    return msg
 
 ping :: Interaction Bool
 ping = do
