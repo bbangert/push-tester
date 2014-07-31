@@ -11,9 +11,12 @@ import qualified Control.Exception     as E
 import           Control.Monad         (forever, replicateM_, void)
 import qualified Data.ByteString.Char8 as BC
 import           Data.IORef
+import           Data.List.Split       (splitOn)
 import           Data.Sequence         ((|>))
 import qualified Data.Sequence         as S
+import qualified Network.Metric        as Metric
 import qualified Network.WebSockets    as WS
+
 import           System.Environment    (getArgs)
 import           Text.Printf           (printf)
 
@@ -23,6 +26,14 @@ data ClientTracker = ClientTracker
     { attempting :: IORef Int
     , connected  :: IORef Int
     , maxClients :: !Int
+    }
+
+data TestConfig = TC
+    { tcHostip      :: String
+    , tcPort        :: Int
+    , tcTracker     :: ClientTracker
+    , tcInitStorage :: Storage
+    , tcStatsd      :: Metric.AnySink
     }
 
 newClientTracker :: Int -> IO ClientTracker
@@ -46,32 +57,37 @@ watcher (ClientTracker att conns m) spawn = forever $ do
 
 main :: IO ()
 main = runInUnboundThread $ do
-    [ip, port, spawnCount] <- getArgs
-    let maxC = read spawnCount
-    clientTracker <- newClientTracker maxC
+    [ip, port, spawnCount, statsdHost] <- getArgs
+    let (sHostname:sPort:[]) = splitOn ":" statsdHost
+        portNum = fromInteger $ (read sPort :: Integer)
+        maxC = read spawnCount
+    sink <- Metric.open Metric.Statsd "" sHostname portNum
 
+    clientTracker <- newClientTracker maxC
     storage <- newStorage
 
-    let spawn = startWs ip (read port) clientTracker channelMonster storage
+    let tconfig = TC ip (read port) clientTracker storage sink
+
+    let spawn = startWs tconfig channelMonster
     incRef maxC (attempting clientTracker)
     replicateM_ maxC spawn
     watcher clientTracker spawn
 
-startWs :: String -> Int -> ClientTracker -> Interaction () -> Storage -> IO ()
-startWs host port tracker i storage =
+startWs :: TestConfig -> Interaction () -> IO ()
+startWs tc@(TC host port tracker _ _) i =
     void . forkIO $ E.finally safeSpawn $ decRef (attempting tracker)
   where
     safeSpawn = eatExceptions $ spawn
     spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
               [("Origin", BC.concat [BC.pack host, ":", BC.pack $ show port])]
-              $ interactionTester tracker i storage
+              $ interactionTester tc i
 
-interactionTester :: ClientTracker -> Interaction a -> Storage -> WS.ClientApp ()
-interactionTester (ClientTracker _ conns _) i storage conn = do
+interactionTester :: TestConfig -> Interaction a -> WS.ClientApp ()
+interactionTester (TC _ _ (ClientTracker _ conns _) storage sink) i conn = do
     incRef 1 conns
     E.finally runit $ decRef conns
   where
-    config = newConfig conn
+    config = newConfig conn sink
     runit = void $ runInteraction i config storage
 
 incRef :: Int -> IORef Int -> IO ()

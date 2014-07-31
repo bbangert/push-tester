@@ -40,10 +40,13 @@ import           Control.Monad              (void)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
 import           Control.Monad.State.Strict (StateT, get, runStateT)
 import           Control.Monad.Trans        (liftIO)
+import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.String                (fromString)
+import           Data.Time.Clock.POSIX      (getPOSIXTime)
+import qualified Network.Metric             as Metric
 import qualified Network.WebSockets         as WS
 import qualified Network.Wreq.Session       as Wreq
 import           Test.QuickCheck            (arbitrary)
@@ -63,18 +66,19 @@ type Result = String
 type VariableStorage = Map.Map String Result
 
 data Storage = Storage
-    { stVariables :: !VariableStorage
+    { _stVariables :: !VariableStorage
     , stSession   :: !Wreq.Session
     }
 
 data Config = IConfig
     { iconn :: !WS.Connection
+    , iStat :: !Metric.AnySink
     }
 
 newStorage :: IO Storage
 newStorage = Wreq.withSession $ return . (Storage Map.empty)
 
-newConfig :: WS.Connection -> Config
+newConfig :: WS.Connection -> Metric.AnySink -> Config
 newConfig = IConfig
 
 -- | Interaction monad transformer for a simplePush interaction
@@ -83,6 +87,26 @@ type Interaction = ReaderT Config (StateT Storage IO)
 -- | Run a complete websocket client interaction
 runInteraction :: Interaction a -> Config -> Storage -> IO (a, Storage)
 runInteraction interaction config = runStateT (runReaderT interaction config)
+
+{-  * Statistics helpers
+
+-}
+
+-- | Times an interaction and returns its result after sending the timer metric
+--   recorded over the supplied metric sink.
+withTimer :: ByteString             -- ^ Metric namespace
+          -> ByteString             -- ^ Metric bucket name
+          -> Metric.AnySink         -- ^ Metric sink to use
+          -> Interaction a          -- ^ Interaction to run
+          -> Interaction a
+withTimer namespace bucket sink op = do
+    now <- liftIO getPOSIXTime
+    opVal <- op
+    done <- liftIO getPOSIXTime
+    let tDiff = realToFrac $ done - now
+        diff  = tDiff * 1000
+    liftIO $ eatExceptions $ Metric.push sink $ Metric.Timer namespace bucket diff
+    return opVal
 
 {-  * Utility Methods for raw message sending/recieving interactions
 
@@ -155,8 +179,10 @@ unregister cid = sendRecieve unregisterMsg
 sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
 sendPushNotification (cid, endpoint) ver = do
     sess <- stSession <$> get
-    liftIO $ send sess endpoint ver
-    msg <- getMessage
+    sink <- iStat <$> ask
+    msg <- withTimer "simplepush.client" "pushNotification" sink $ do
+            liftIO $ send sess endpoint ver
+            getMessage
     assertEndpointMatch cid msg
     return msg
 
