@@ -9,22 +9,15 @@ import           Control.Applicative   ((<$>))
 import           Control.Concurrent    (forkIO, runInUnboundThread, threadDelay)
 import qualified Control.Exception     as E
 import           Control.Monad         (forever, replicateM_, void)
-import           Control.Monad.Trans   (liftIO)
-import qualified Data.Sequence as S
-import           Crypto.Random         (newGenIO)
-import           Data.ByteString       (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import           Data.IORef
-import Data.Sequence ((|>))
+import           Data.Sequence         ((|>))
+import qualified Data.Sequence         as S
 import qualified Network.WebSockets    as WS
 import           System.Environment    (getArgs)
-import           Test.QuickCheck       (arbitrary)
-import           Test.QuickCheck.Gen   (Gen, generate)
 import           Text.Printf           (printf)
 
 import           SimpleTest.Interact
-import           SimpleTest.Types      (Endpoint)
-import           SimpleTest.Util       (ValidChannelID (..))
 
 data ClientTracker = ClientTracker
     { attempting :: IORef Int
@@ -47,7 +40,7 @@ watcher (ClientTracker att conns m) spawn = forever $ do
     count <- readIORef conns
     attempts <- readIORef att
     printf "Clients Connected: %s\n" (show count)
-    let spawnCount = m - count
+    let spawnCount = m - attempts
     incRef spawnCount att
     replicateM_ spawnCount spawn
 
@@ -74,7 +67,7 @@ startWs host port tracker i storage =
               $ interactionTester tracker i storage
 
 interactionTester :: ClientTracker -> Interaction a -> Storage -> WS.ClientApp ()
-interactionTester (ClientTracker att conns _) i storage conn = do
+interactionTester (ClientTracker _ conns _) i storage conn = do
     incRef 1 conns
     E.finally runit $ decRef conns
   where
@@ -103,23 +96,24 @@ setupNewEndpoint = do
 --  every 5 seconds and never pings
 basic :: Interaction ()
 basic = do
-    helo Nothing (Just [])
+    _ <- helo Nothing (Just [])
     ep <- setupNewEndpoint
     forever $ do
-        sendPushNotification ep Nothing
+        _ <- sendPushNotification ep Nothing
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
 pingDeliver :: Interaction ()
 pingDeliver = do
-    helo Nothing (Just [])
+    _ <- helo Nothing (Just [])
     endpoint <- setupNewEndpoint
     loop 0 endpoint
   where
+    loop :: Int -> (ChannelID, Endpoint) -> Interaction ()
     loop count endpoint = do
-        sendPushNotification endpoint Nothing
+        _ <- sendPushNotification endpoint Nothing
         if count == 20 then do
-            ping
+            _ <- ping
             wait 10
             loop 10 endpoint
         else do
@@ -130,9 +124,10 @@ pingDeliver = do
 --   Chooses a channel randomly every 5 seconds for delivery and sends a push
 channelMonster :: Interaction ()
 channelMonster = do
-    helo Nothing (Just [])
+    _ <- helo Nothing (Just [])
     loop 0 S.empty
   where
+    loop :: Int -> S.Seq (ChannelID, Endpoint) -> Interaction ()
     loop count eps = do
         eps' <- if (count `mod` 10 == 0) then do
                     endpoint <- setupNewEndpoint
@@ -140,6 +135,6 @@ channelMonster = do
                 else return eps
         i <- randomNumber (0, S.length eps' - 1)
         let ep = S.index eps' i
-        sendPushNotification ep Nothing
+        _ <- sendPushNotification ep Nothing
         wait 5
         loop (count+5) eps'
