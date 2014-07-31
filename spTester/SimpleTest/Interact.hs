@@ -15,6 +15,8 @@ module SimpleTest.Interact
       -- ** Interaction helpers
     , wait
     , randomChannelId
+    , randomElement
+    , randomNumber
 
       -- ** Interaction Message manipulation commands
     , getEndpoint
@@ -45,7 +47,7 @@ import           Data.String                (fromString)
 import qualified Network.WebSockets         as WS
 import qualified Network.Wreq.Session       as Wreq
 import           Test.QuickCheck            (arbitrary)
-import           Test.QuickCheck.Gen        (Gen, generate)
+import           Test.QuickCheck.Gen        (Gen, generate, elements, choose)
 
 import           PushClient                 (Message (..), mkMessage,
                                              receiveMessage, sendReceiveMessage)
@@ -68,8 +70,8 @@ data Config = IConfig
     { iconn :: !WS.Connection
     }
 
-newStorage :: Wreq.Session -> Storage
-newStorage session = Storage Map.empty session
+newStorage :: IO Storage
+newStorage = Wreq.withSession $ return . (Storage Map.empty)
 
 newConfig :: WS.Connection -> Config
 newConfig = IConfig
@@ -144,6 +146,13 @@ randomChannelId :: Interaction ChannelID
 randomChannelId = do
     (ValidChannelID cid) <- liftIO $ generate (arbitrary :: Gen ValidChannelID)
     return cid
+
+-- | Choose from a list randomly
+randomElement :: [a] -> Interaction a
+randomElement xs = (liftIO $ generate (elements xs)) >>= return
+
+randomNumber :: (Int, Int) -> Interaction Int
+randomNumber (l, u) = (liftIO $ generate (choose (l, u))) >>= return
 
 {-  * Utility methods for parsing messages and generating components
 

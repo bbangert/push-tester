@@ -10,12 +10,13 @@ import           Control.Concurrent    (forkIO, runInUnboundThread, threadDelay)
 import qualified Control.Exception     as E
 import           Control.Monad         (forever, replicateM_, void)
 import           Control.Monad.Trans   (liftIO)
+import qualified Data.Sequence as S
 import           Crypto.Random         (newGenIO)
 import           Data.ByteString       (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import           Data.IORef
+import Data.Sequence ((|>))
 import qualified Network.WebSockets    as WS
-import           Network.Wreq.Session  (withSession)
 import           System.Environment    (getArgs)
 import           Test.QuickCheck       (arbitrary)
 import           Test.QuickCheck.Gen   (Gen, generate)
@@ -56,9 +57,9 @@ main = runInUnboundThread $ do
     let maxC = read spawnCount
     clientTracker <- newClientTracker maxC
 
-    storage <- withSession $ \sess -> return $ newStorage sess
+    storage <- newStorage
 
-    let spawn = startWs ip (read port) clientTracker pingDeliverInteraction storage
+    let spawn = startWs ip (read port) clientTracker pingDeliver storage
     incRef maxC (attempting clientTracker)
     replicateM_ maxC spawn
     watcher clientTracker spawn
@@ -100,8 +101,8 @@ setupNewEndpoint = do
 
 -- | Basic single channel registration that sends a notification to itself
 --  every 5 seconds and never pings
-basicInteraction :: Interaction ()
-basicInteraction = do
+basic :: Interaction ()
+basic = do
     helo Nothing (Just [])
     (_, endpoint) <- setupNewEndpoint
     forever $ do
@@ -109,8 +110,8 @@ basicInteraction = do
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
-pingDeliverInteraction :: Interaction ()
-pingDeliverInteraction = do
+pingDeliver :: Interaction ()
+pingDeliver = do
     helo Nothing (Just [])
     (_, endpoint) <- setupNewEndpoint
     loop 0 endpoint
@@ -124,3 +125,21 @@ pingDeliverInteraction = do
         else do
             wait 10
             loop (count+10) endpoint
+
+-- | Registers a new channel ID every 10 seconds
+--   Chooses a channel randomly every 5 seconds for delivery and sends a push
+channelMonster :: Interaction ()
+channelMonster = do
+    helo Nothing (Just [])
+    loop 0 S.empty
+  where
+    loop count eps = do
+        eps' <- if (count `mod` 10 == 0) then do
+                    (_, endpoint) <- setupNewEndpoint
+                    return $ eps |> endpoint
+                else return eps
+        index <- randomNumber (0, S.length eps' - 1)
+        let ep = S.index eps' index
+        sendPushNotification ep Nothing
+        wait 5
+        loop (count+5) eps'
