@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -funbox-strict-fields #-}
+
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -13,18 +15,20 @@ import           Data.ByteString       (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import           Data.IORef
 import qualified Network.WebSockets    as WS
+import           Network.Wreq.Session  (withSession)
 import           System.Environment    (getArgs)
 import           Test.QuickCheck       (arbitrary)
 import           Test.QuickCheck.Gen   (Gen, generate)
 import           Text.Printf           (printf)
 
 import           SimpleTest.Interact
+import           SimpleTest.Types      (Endpoint)
 import           SimpleTest.Util       (ValidChannelID (..))
 
 data ClientTracker = ClientTracker
     { attempting :: IORef Int
     , connected  :: IORef Int
-    , maxClients :: Int
+    , maxClients :: !Int
     }
 
 newClientTracker :: Int -> IO ClientTracker
@@ -52,26 +56,27 @@ main = runInUnboundThread $ do
     let maxC = read spawnCount
     clientTracker <- newClientTracker maxC
 
-    let spawn = startWs ip (read port) clientTracker basicInteraction
+    storage <- withSession $ \sess -> return $ newStorage sess
+
+    let spawn = startWs ip (read port) clientTracker pingDeliverInteraction storage
     incRef maxC (attempting clientTracker)
     replicateM_ maxC spawn
     watcher clientTracker spawn
 
-startWs :: String -> Int -> ClientTracker -> Interaction () -> IO ()
-startWs host port tracker i =
+startWs :: String -> Int -> ClientTracker -> Interaction () -> Storage -> IO ()
+startWs host port tracker i storage =
     void . forkIO $ E.finally safeSpawn $ decRef (attempting tracker)
   where
     safeSpawn = eatExceptions $ spawn
     spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
               [("Origin", BC.concat [BC.pack host, ":", BC.pack $ show port])]
-              $ interactionTester tracker i
+              $ interactionTester tracker i storage
 
-interactionTester :: ClientTracker -> Interaction a -> WS.ClientApp ()
-interactionTester (ClientTracker att conns _) i conn = do
+interactionTester :: ClientTracker -> Interaction a -> Storage -> WS.ClientApp ()
+interactionTester (ClientTracker att conns _) i storage conn = do
     incRef 1 conns
     E.finally runit $ decRef conns
   where
-    storage = newStorage
     config = newConfig conn
     runit = void $ runInteraction i config storage
 
@@ -85,13 +90,36 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
 -}
 
+-- | A helper interaction that starts a new registration and returns a new
+--   endpoint for a channelID
+setupNewEndpoint :: Interaction (ChannelID, Endpoint)
+setupNewEndpoint = do
+    helo Nothing (Just [])
+    cid <- randomChannelId
+    endpoint <- getEndpoint <$> register cid
+    return (cid, endpoint)
+
 -- | Basic single channel registration that sends a notification to itself
 --  every 5 seconds and never pings
 basicInteraction :: Interaction ()
 basicInteraction = do
-    helo Nothing (Just [])
-    cid <- randomChannelId
-    endpoint <- getEndpoint <$> register cid
+    (_, endpoint) <- setupNewEndpoint
     forever $ do
         sendPushNotification endpoint Nothing
         wait 5
+
+-- | Delivers a notification once every 10 seconds, pings every 20 seconds
+pingDeliverInteraction :: Interaction ()
+pingDeliverInteraction = do
+    (_, endpoint) <- setupNewEndpoint
+    loop 0 endpoint
+  where
+    loop count endpoint = do
+        sendPushNotification endpoint Nothing
+        if count == 20 then do
+            ping
+            wait 10
+            loop 10 endpoint
+        else do
+            wait 10
+            loop (count+10) endpoint

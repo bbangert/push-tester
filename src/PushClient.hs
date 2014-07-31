@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -funbox-strict-fields #-}
 --------------------------------------------------------------------------------
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -20,20 +21,20 @@ import           GHC.Generics
 import qualified Network.WebSockets   as WS
 
 -- Generic Message construct for easy JSON encode/decode
-data Message = Message { messageType  :: String
-                       , uaid         :: Maybe Text
-                       , channelIDs   :: Maybe [String]
-                       , channelID    :: Maybe String
-                       , status       :: Maybe Int
-                       , pushEndpoint :: Maybe String
-                       , updates      :: Maybe [ChannelUpdate]
+data Message = Message { messageType  :: !String
+                       , uaid         :: !(Maybe Text)
+                       , channelIDs   :: !(Maybe [String])
+                       , channelID    :: !(Maybe String)
+                       , status       :: !(Maybe Int)
+                       , pushEndpoint :: !(Maybe String)
+                       , updates      :: !(Maybe [ChannelUpdate])
                        } deriving (Show, Eq, Generic)
 instance ToJSON Message where
     toJSON = genericToJSON $ defaultOptions { omitNothingFields = True }
 instance FromJSON Message
 
-data ChannelUpdate = ChannelUpdate { cu_channelID :: String
-                                   , cu_version   :: Int
+data ChannelUpdate = ChannelUpdate { cu_channelID :: !String
+                                   , cu_version   :: !Int
                                    } deriving (Show, Eq, Generic)
 instance ToJSON ChannelUpdate where
     toJSON = genericToJSON $ defaultOptions { fieldLabelModifier = drop 3 }

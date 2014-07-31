@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -funbox-strict-fields #-}
+
 module SimpleTest.Types
     (
       -- * Basic SimpleTest Types

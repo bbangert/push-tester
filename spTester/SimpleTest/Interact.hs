@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -8,6 +9,7 @@ module SimpleTest.Interact
     , helo
     , register
     , unregister
+    , ping
     , sendPushNotification
 
       -- ** Interaction helpers
@@ -41,7 +43,7 @@ import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.String                (fromString)
 import qualified Network.WebSockets         as WS
-import qualified Network.Wreq               as Wreq
+import qualified Network.Wreq.Session       as Wreq
 import           Test.QuickCheck            (arbitrary)
 import           Test.QuickCheck.Gen        (Gen, generate)
 
@@ -58,15 +60,16 @@ type Result = String
 type VariableStorage = Map.Map String Result
 
 data Storage = Storage
-    { variables :: VariableStorage
-    } deriving (Show, Eq)
-
-data Config = IConfig
-    { iconn :: WS.Connection
+    { stVariables :: !VariableStorage
+    , stSession   :: !Wreq.Session
     }
 
-newStorage :: Storage
-newStorage = Storage Map.empty
+data Config = IConfig
+    { iconn :: !WS.Connection
+    }
+
+newStorage :: Wreq.Session -> Storage
+newStorage session = Storage Map.empty session
 
 newConfig :: WS.Connection -> Config
 newConfig = IConfig
@@ -121,8 +124,16 @@ unregister cid = sendRecieve unregisterMsg
 
 sendPushNotification :: Endpoint -> Version -> Interaction Message
 sendPushNotification endpoint ver = do
-    liftIO $ send endpoint ver
+    sess <- stSession <$> get
+    liftIO $ send sess endpoint ver
     getMessage
+
+ping :: Interaction Bool
+ping = do
+    conn <- iconn <$> ask
+    liftIO $ WS.sendTextData conn ("{}" :: BL.ByteString)
+    (d :: BL.ByteString) <- liftIO $ WS.receiveData conn
+    return $ d == "{}"
 
 -- | Wait for a given amount of seconds
 wait :: Int -> Interaction ()
@@ -139,9 +150,9 @@ randomChannelId = do
 -}
 
 -- | Send a PUT request to a notification point
-send :: String -> Version -> IO ()
-send ep ver =
-    void $ forkIO $ void . eatExceptions $ Wreq.put ep $ serializeVersion ver
+send :: Wreq.Session -> String -> Version -> IO ()
+send sess ep ver =
+    void $ forkIO $ void . eatExceptions $ Wreq.put sess ep $ serializeVersion ver
 
 -- | Serialize the version to a bytestring for sending
 serializeVersion :: Version -> BL.ByteString
