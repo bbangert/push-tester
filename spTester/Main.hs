@@ -94,7 +94,6 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 --   endpoint for a channelID
 setupNewEndpoint :: Interaction (ChannelID, Endpoint)
 setupNewEndpoint = do
-    helo Nothing (Just [])
     cid <- randomChannelId
     endpoint <- getEndpoint <$> register cid
     return (cid, endpoint)
@@ -103,6 +102,7 @@ setupNewEndpoint = do
 --  every 5 seconds and never pings
 basicInteraction :: Interaction ()
 basicInteraction = do
+    helo Nothing (Just [])
     (_, endpoint) <- setupNewEndpoint
     forever $ do
         sendPushNotification endpoint Nothing
@@ -111,6 +111,7 @@ basicInteraction = do
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
 pingDeliverInteraction :: Interaction ()
 pingDeliverInteraction = do
+    helo Nothing (Just [])
     (_, endpoint) <- setupNewEndpoint
     loop 0 endpoint
   where
