@@ -8,10 +8,12 @@ module Main where
 import           Control.Applicative   ((<$>))
 import           Control.Concurrent    (forkIO, runInUnboundThread, threadDelay)
 import qualified Control.Exception     as E
-import           Control.Monad         (forever, replicateM_, void)
+import           Control.Monad         (forever, replicateM_, void, when)
 import qualified Data.ByteString.Char8 as BC
 import           Data.IORef
 import           Data.List.Split       (splitOn)
+import qualified Data.Map.Strict       as Map
+import           Data.Maybe            (fromJust, isNothing)
 import           Data.Sequence         ((|>))
 import qualified Data.Sequence         as S
 import qualified Network.Metric        as Metric
@@ -45,6 +47,11 @@ newClientTracker m = do
 eatExceptions :: IO a -> IO ()
 eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()
 
+exceptionToUsage :: IO a -> IO ()
+exceptionToUsage m = void m `E.catch` \(_ :: E.SomeException) -> do
+    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
+    return ()
+
 watcher :: ClientTracker -> IO () -> IO ()
 watcher (ClientTracker att conns m) spawn = forever $ do
     threadDelay (5*1000000)
@@ -56,11 +63,15 @@ watcher (ClientTracker att conns m) spawn = forever $ do
     replicateM_ spawnCount spawn
 
 main :: IO ()
-main = runInUnboundThread $ do
-    [ip, port, spawnCount, statsdHost] <- getArgs
+main = runInUnboundThread $ exceptionToUsage $ do
+    [ip, port, spawnCount, strategy, statsdHost] <- getArgs
     let (sHostname:sPort:[]) = splitOn ":" statsdHost
         portNum = fromInteger $ (read sPort :: Integer)
         maxC = read spawnCount
+        interaction = Map.lookup strategy interactions
+
+    when (isNothing interaction) $ fail "Bad interation lookup"
+
     sink <- Metric.open Metric.Statsd "" sHostname portNum
 
     clientTracker <- newClientTracker maxC
@@ -68,7 +79,7 @@ main = runInUnboundThread $ do
 
     let tconfig = TC ip (read port) clientTracker storage sink
 
-    let spawn = startWs tconfig channelMonster
+    let spawn = startWs tconfig $ fromJust interaction
     incRef maxC (attempting clientTracker)
     replicateM_ maxC spawn
     watcher clientTracker spawn
@@ -99,6 +110,13 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 {- * SimplePush Client Interactions
 
 -}
+
+interactions :: Map.Map String (Interaction ())
+interactions = Map.fromList
+    [ ("basic",    basic)
+    , ("ping",     pingDeliver)
+    , ("channels", channelMonster)
+    ]
 
 -- | A helper interaction that starts a new registration and returns a new
 --   endpoint for a channelID
