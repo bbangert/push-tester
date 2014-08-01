@@ -90,7 +90,7 @@ startWs tc@(TC host port tracker _ _) i =
   where
     safeSpawn = eatExceptions $ spawn
     spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
-              [("Origin", BC.concat [BC.pack host, ":", BC.pack $ show port])]
+              [("Origin", BC.concat ["http://", BC.pack host, ":", BC.pack $ show port])]
               $ interactionTester tc i
 
 interactionTester :: TestConfig -> Interaction a -> WS.ClientApp ()
