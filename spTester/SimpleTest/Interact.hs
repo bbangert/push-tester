@@ -38,7 +38,7 @@ import           Control.Concurrent         (forkIO, threadDelay)
 import qualified Control.Exception          as E
 import           Control.Monad              (void)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
-import           Control.Monad.State.Strict (StateT, get, runStateT)
+import           Control.Monad.State.Strict (StateT, runStateT)
 import           Control.Monad.Trans        (liftIO)
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Lazy       as BL
@@ -67,18 +67,18 @@ type VariableStorage = Map.Map String Result
 
 data Storage = Storage
     { _stVariables :: !VariableStorage
-    , stSession   :: !Wreq.Session
     }
 
 data Config = IConfig
     { iconn :: !WS.Connection
     , iStat :: !Metric.AnySink
+    , iSession    :: !Wreq.Session
     }
 
-newStorage :: IO Storage
-newStorage = Wreq.withSession $ return . (Storage Map.empty)
+newStorage :: Storage
+newStorage = Storage Map.empty
 
-newConfig :: WS.Connection -> Metric.AnySink -> Config
+newConfig :: WS.Connection -> Metric.AnySink -> Wreq.Session -> Config
 newConfig = IConfig
 
 -- | Interaction monad transformer for a simplePush interaction
@@ -178,7 +178,7 @@ unregister cid = sendRecieve unregisterMsg
 
 sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
 sendPushNotification (cid, endpoint) ver = do
-    sess <- stSession <$> get
+    sess <- iSession <$> ask
     sink <- iStat <$> ask
     msg <- withTimer "simplepush.client" "pushNotification" sink $ do
             liftIO $ send sess endpoint ver

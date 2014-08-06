@@ -18,7 +18,7 @@ import           Data.Sequence         ((|>))
 import qualified Data.Sequence         as S
 import qualified Network.Metric        as Metric
 import qualified Network.WebSockets    as WS
-
+import qualified Network.Wreq.Session  as Wreq
 import           System.Environment    (getArgs)
 import           Text.Printf           (printf)
 
@@ -36,6 +36,7 @@ data TestConfig = TC
     , tcTracker     :: ClientTracker
     , tcInitStorage :: Storage
     , tcStatsd      :: Metric.AnySink
+    , tcSession     :: Wreq.Session
     }
 
 newClientTracker :: Int -> IO ClientTracker
@@ -73,11 +74,11 @@ main = runInUnboundThread $ exceptionToUsage $ do
     when (isNothing interaction) $ fail "Bad interation lookup"
 
     sink <- Metric.open Metric.Statsd "" sHostname portNum
+    sess <- Wreq.withSession return
 
     clientTracker <- newClientTracker maxC
-    storage <- newStorage
 
-    let tconfig = TC ip (read port) clientTracker storage sink
+    let tconfig = TC ip (read port) clientTracker newStorage sink sess
 
     let spawn = startWs tconfig $ fromJust interaction
     incRef maxC (attempting clientTracker)
@@ -85,7 +86,7 @@ main = runInUnboundThread $ exceptionToUsage $ do
     watcher clientTracker spawn
 
 startWs :: TestConfig -> Interaction () -> IO ()
-startWs tc@(TC host port tracker _ _) i =
+startWs tc@(TC host port tracker _ _ _) i =
     void . forkIO $ E.finally safeSpawn $ decRef (attempting tracker)
   where
     safeSpawn = eatExceptions $ spawn
@@ -94,11 +95,11 @@ startWs tc@(TC host port tracker _ _) i =
               $ interactionTester tc i
 
 interactionTester :: TestConfig -> Interaction a -> WS.ClientApp ()
-interactionTester (TC _ _ (ClientTracker _ conns _) storage sink) i conn = do
+interactionTester (TC _ _ (ClientTracker _ conns _) storage sink sess) i conn = do
     incRef 1 conns
     E.finally runit $ decRef conns
   where
-    config = newConfig conn sink
+    config = newConfig conn sink sess
     runit = void $ runInteraction i config storage
 
 incRef :: Int -> IORef Int -> IO ()
