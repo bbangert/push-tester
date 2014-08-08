@@ -134,7 +134,7 @@ getEndpoint = fromJust . pushEndpoint
 assert :: Show a => (Bool, a) -> String -> Interaction ()
 assert (True, _) _ = return ()
 assert (False, obj) msg = do
-    liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ (show obj)
+    liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ show obj
     fail "Abort"
 
 assertStatus200 :: Message -> Interaction ()
@@ -205,10 +205,10 @@ randomChannelId = do
 
 -- | Choose from a list randomly
 randomElement :: [a] -> Interaction a
-randomElement xs = (liftIO $ generate (elements xs)) >>= return
+randomElement xs = liftIO $ generate (elements xs)
 
 randomNumber :: (Int, Int) -> Interaction Int
-randomNumber (l, u) = (liftIO $ generate (choose (l, u))) >>= return
+randomNumber (l, u) = liftIO $ generate $ choose (l, u)
 
 {-  * Utility methods for parsing messages and generating components
 

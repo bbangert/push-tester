@@ -67,7 +67,7 @@ main :: IO ()
 main = runInUnboundThread $ exceptionToUsage $ do
     [ip, port, spawnCount, strategy, statsdHost] <- getArgs
     let (sHostname:sPort:[]) = splitOn ":" statsdHost
-        portNum = fromInteger $ (read sPort :: Integer)
+        portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
 
@@ -89,7 +89,7 @@ startWs :: TestConfig -> Interaction () -> IO ()
 startWs tc@(TC host port tracker _ _ _) i =
     void . forkIO $ E.finally safeSpawn $ decRef (attempting tracker)
   where
-    safeSpawn = eatExceptions $ spawn
+    safeSpawn = eatExceptions spawn
     spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
               [("Origin", BC.concat ["http://", BC.pack host, ":", BC.pack $ show port])]
               $ interactionTester tc i
@@ -164,7 +164,7 @@ channelMonster = do
   where
     loop :: Int -> S.Seq (ChannelID, Endpoint) -> Interaction ()
     loop count eps = do
-        eps' <- if (count `mod` 10 == 0) then do
+        eps' <- if count `mod` 10 == 0 then do
                     endpoint <- setupNewEndpoint
                     return $ eps |> endpoint
                 else return eps
