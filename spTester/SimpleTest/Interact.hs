@@ -116,13 +116,13 @@ withTimer namespace bucket sink op = do
 sendRecieve :: Message -> Interaction Message
 sendRecieve msg = do
     conn <- iconn <$> ask
-    liftIO (sendReceiveMessage msg conn) >>= return
+    liftIO (sendReceiveMessage msg conn)
 
 -- | Get a message
 getMessage :: Interaction Message
 getMessage = do
     conn <- iconn <$> ask
-    liftIO (receiveMessage conn) >>= return
+    liftIO (receiveMessage conn)
 
 getEndpoint :: Message -> String
 getEndpoint = fromJust . pushEndpoint
