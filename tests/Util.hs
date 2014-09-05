@@ -28,6 +28,8 @@ import qualified Network.WebSockets      as WS
 
 import           PushClient
 
+----------------------------------------------------------------
+
 type Uaid = Maybe Text
 type ChannelIDs = Maybe [String]
 type ChannelID = Maybe String
@@ -38,6 +40,17 @@ type Updates = Int
 newtype AnyUaid = AnyUaid Uaid deriving (Show)
 newtype ValidUaid = ValidUaid Uaid deriving (Show)
 newtype ValidChannelID = ValidChannelID ChannelID deriving (Show)
+
+instance Arbitrary AnyUaid where
+  arbitrary = AnyUaid . Just . fromString <$> uaidGen
+
+instance Arbitrary ValidUaid where
+  arbitrary = ValidUaid . Just . fromString <$> vectorOf 32 hexChar
+
+instance Arbitrary ValidChannelID where
+  arbitrary = ValidChannelID . Just <$> vectorOf 32 hexChar
+
+----------------------------------------------------------------
 
 data Action = Hello Uaid ChannelIDs
             | Register ChannelID
@@ -53,14 +66,15 @@ data Result = HelloSuccess Uaid ChannelIDs
              | BadRequest String
              deriving (Show, Eq)
 
-instance Arbitrary AnyUaid where
-  arbitrary = AnyUaid . Just . fromString <$> uaidGen
+----------------------------------------------------------------
 
-instance Arbitrary ValidUaid where
-  arbitrary = ValidUaid . Just . fromString <$> vectorOf 32 hexChar
+uaidGen :: Gen String
+uaidGen = listOf1 hexChar
 
-instance Arbitrary ValidChannelID where
-  arbitrary = ValidChannelID . Just <$> vectorOf 32 hexChar
+hexChar :: Gen Char
+hexChar = elements (['a'..'f'] ++ ['0'..'9'])
+
+----------------------------------------------------------------
 
 resultsIn :: [(Action, Result)] -> Property
 resultsIn lst = monadicIO $ do
@@ -116,12 +130,6 @@ parseResult Message { messageType = "unregister"}     = UnRegisterSuccess
 parseResult Message { messageType = "notification",
                       updates = us}                   = NotificationUpdate (length . fromJust $ us)
 parseResult msg                                       = BadResponse msg
-
-uaidGen :: Gen String
-uaidGen = listOf1 hexChar
-
-hexChar :: Gen Char
-hexChar = elements (['a'..'f'] ++ ['0'..'9'])
 
 withPushServer :: WS.ClientApp a -> IO a
 withPushServer = WS.runClientWith "localhost" 8080 "/" WS.defaultConnectionOptions

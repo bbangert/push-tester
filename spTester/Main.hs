@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
-
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -73,7 +72,7 @@ main = runInUnboundThread $ exceptionToUsage $ do
 
     when (isNothing interaction) $ fail "Bad interation lookup"
 
-    sink <- Metric.open Metric.Statsd "" sHostname portNum
+    sink <- Metric.open Metric.Statsd Nothing sHostname portNum
     sess <- Wreq.withSession return
 
     clientTracker <- newClientTracker maxC
