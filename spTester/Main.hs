@@ -47,10 +47,10 @@ newClientTracker m = do
 eatExceptions :: IO a -> IO ()
 eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()
 
-exceptionToUsage :: IO a -> IO ()
-exceptionToUsage m = void m `E.catch` \(_ :: E.SomeException) -> do
+exceptionToUsage :: IO a -> IO (Maybe a)
+exceptionToUsage m = (Just <$> m) `E.catch` \(_ :: E.SomeException) -> do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
-    return ()
+    return Nothing
 
 watcher :: ClientTracker -> IO () -> IO ()
 watcher (ClientTracker att conns m) spawn = forever $ do
@@ -63,14 +63,26 @@ watcher (ClientTracker att conns m) spawn = forever $ do
     replicateM_ spawnCount spawn
 
 main :: IO ()
-main = runInUnboundThread $ exceptionToUsage $ do
+main = parseArguments >>= maybe (return ()) runTester
+
+runTester :: (TestConfig, Interaction (), Int) -> IO ()
+runTester (testConfig, interaction, maxConnections) = runInUnboundThread $ do
+    incRef maxConnections (attempting clientTracker)
+    replicateM_ maxConnections spawn
+    watcher clientTracker spawn
+  where
+    spawn = startWs testConfig interaction
+    clientTracker = tcTracker testConfig
+
+parseArguments :: IO (Maybe (TestConfig, Interaction (), Int))
+parseArguments = exceptionToUsage $ do
     [ip, port, spawnCount, strategy, statsdHost] <- getArgs
     let (sHostname:sPort:[]) = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
 
-    when (isNothing interaction) $ fail "Bad interation lookup"
+    when (isNothing interaction) $ fail "Bad interaction lookup"
 
     sink <- Metric.open Metric.Statsd Nothing sHostname portNum
     sess <- Wreq.withSession return
@@ -78,11 +90,7 @@ main = runInUnboundThread $ exceptionToUsage $ do
     clientTracker <- newClientTracker maxC
 
     let tconfig = TC ip (read port) clientTracker newStorage sink sess
-
-    let spawn = startWs tconfig $ fromJust interaction
-    incRef maxC (attempting clientTracker)
-    replicateM_ maxC spawn
-    watcher clientTracker spawn
+    return (tconfig, fromJust interaction, maxC)
 
 startWs :: TestConfig -> Interaction () -> IO ()
 startWs tc@(TC host port tracker _ _ _) i =
@@ -130,10 +138,10 @@ setupNewEndpoint = do
 --  every 5 seconds and never pings
 basic :: Interaction ()
 basic = do
-    _ <- helo Nothing (Just [])
+    void $ helo Nothing (Just [])
     ep <- setupNewEndpoint
     forever $ do
-        _ <- sendPushNotification ep Nothing
+        void $ sendPushNotification ep Nothing
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
@@ -147,7 +155,7 @@ pingDeliver = do
     loop count endpoint = do
         _ <- sendPushNotification endpoint Nothing
         if count == 20 then do
-            _ <- ping
+            void ping
             wait 10
             loop 10 endpoint
         else do
@@ -169,6 +177,6 @@ channelMonster = do
                 else return eps
         i <- randomNumber (0, S.length eps' - 1)
         let ep = S.index eps' i
-        _ <- sendPushNotification ep Nothing
+        void $ sendPushNotification ep Nothing
         wait 5
         loop (count+5) eps'
