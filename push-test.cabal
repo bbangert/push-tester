@@ -54,7 +54,7 @@ Executable spTester
     , crypto-api    >= 0.12.2.2
     , wreq          >= 0.1
     , QuickCheck    >= 2.7.6
-    , network-metrics >= 0.3.2
+    , network-metrics >= 0.4
     , hostname      >= 1.0
     , split         >= 0.2.2
     , network       >= 2.5
