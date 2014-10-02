@@ -23,6 +23,8 @@ import           Text.Printf           (printf)
 
 import           SimpleTest.Interact
 
+----------------------------------------------------------------
+
 data ClientTracker = ClientTracker
     { attempting :: IORef Int
     , connected  :: IORef Int
@@ -44,6 +46,8 @@ newClientTracker m = do
     conns  <- newIORef 0
     return $ ClientTracker attempts conns m
 
+----------------------------------------------------------------
+
 eatExceptions :: IO a -> IO ()
 eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()
 
@@ -52,27 +56,11 @@ exceptionToUsage m = (Just <$> m) `E.catch` \(_ :: E.SomeException) -> do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
     return Nothing
 
-watcher :: ClientTracker -> IO () -> IO ()
-watcher (ClientTracker att conns m) spawn = forever $ do
-    threadDelay (5*1000000)
-    count <- readIORef conns
-    attempts <- readIORef att
-    printf "Clients Connected: %s\n" (show count)
-    let spawnCount = m - attempts
-    incRef spawnCount att
-    replicateM_ spawnCount spawn
+----------------------------------------------------------------
 
+-- | Main function to parse arguments and kick off the tester
 main :: IO ()
 main = parseArguments >>= maybe (return ()) runTester
-
-runTester :: (TestConfig, Interaction (), Int) -> IO ()
-runTester (testConfig, interaction, maxConnections) = runInUnboundThread $ do
-    incRef maxConnections (attempting clientTracker)
-    replicateM_ maxConnections spawn
-    watcher clientTracker spawn
-  where
-    spawn = startWs testConfig interaction
-    clientTracker = tcTracker testConfig
 
 parseArguments :: IO (Maybe (TestConfig, Interaction (), Int))
 parseArguments = exceptionToUsage $ do
@@ -91,6 +79,28 @@ parseArguments = exceptionToUsage $ do
 
     let tconfig = TC ip (read port) clientTracker newStorage sink sess
     return (tconfig, fromJust interaction, maxC)
+
+-- | Watches client tracking to echo data to stdout
+watcher :: ClientTracker -> IO () -> IO ()
+watcher (ClientTracker att conns m) spawn = forever $ do
+    threadDelay (5*1000000)
+    count <- readIORef conns
+    attempts <- readIORef att
+    printf "Clients Connected: %s\n" (show count)
+    let spawnCount = m - attempts
+    incRef spawnCount att
+    replicateM_ spawnCount spawn
+
+runTester :: (TestConfig, Interaction (), Int) -> IO ()
+runTester (testConfig, interaction, maxConnections) = runInUnboundThread $ do
+    incRef maxConnections (attempting clientTracker)
+    replicateM_ maxConnections spawn
+    watcher clientTracker spawn
+  where
+    spawn = startWs testConfig interaction
+    clientTracker = tcTracker testConfig
+
+----------------------------------------------------------------
 
 startWs :: TestConfig -> Interaction () -> IO ()
 startWs tc@(TC host port tracker _ _ _) i =
@@ -115,10 +125,13 @@ incRef v ref = void $ atomicModifyIORef' ref (\x -> (x+v, ()))
 decRef :: IORef Int -> IO ()
 decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
+----------------------------------------------------------------
+
 {- * SimplePush Client Interactions
 
 -}
 
+-- | Mapping of all the valid interactions we support
 interactions :: Map.Map String (Interaction ())
 interactions = Map.fromList
     [ ("basic",    basic)
@@ -166,7 +179,7 @@ pingDeliver = do
 --   Chooses a channel randomly every 5 seconds for delivery and sends a push
 channelMonster :: Interaction ()
 channelMonster = do
-    _ <- helo Nothing (Just [])
+    void $ helo Nothing (Just [])
     loop 0 S.empty
   where
     loop :: Int -> S.Seq (ChannelID, Endpoint) -> Interaction ()

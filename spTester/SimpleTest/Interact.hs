@@ -60,6 +60,8 @@ import           SimpleTest.Types           (ChannelID, ChannelIDs, Endpoint,
                                              Uaid, Version)
 import           SimpleTest.Util            (ValidChannelID (..))
 
+----------------------------------------------------------------
+
 type Result = String
 
 -- | Interaction datatypes
@@ -70,10 +72,13 @@ data Storage = Storage
     }
 
 data Config = IConfig
-    { iconn :: !WS.Connection
-    , iStat :: !Metric.AnySink
-    , iSession    :: !Wreq.Session
+    { iconn    :: !WS.Connection
+    , iStat    :: !Metric.AnySink
+    , iSession :: !Wreq.Session
     }
+
+-- | Interaction monad transformer for a simplePush interaction
+type Interaction = ReaderT Config (StateT Storage IO)
 
 newStorage :: Storage
 newStorage = Storage Map.empty
@@ -81,12 +86,11 @@ newStorage = Storage Map.empty
 newConfig :: WS.Connection -> Metric.AnySink -> Wreq.Session -> Config
 newConfig = IConfig
 
--- | Interaction monad transformer for a simplePush interaction
-type Interaction = ReaderT Config (StateT Storage IO)
-
 -- | Run a complete websocket client interaction
 runInteraction :: Interaction a -> Config -> Storage -> IO (a, Storage)
 runInteraction interaction config = runStateT (runReaderT interaction config)
+
+----------------------------------------------------------------
 
 {-  * Statistics helpers
 
@@ -105,8 +109,12 @@ withTimer namespace bucket sink op = do
     done <- liftIO getPOSIXTime
     let tDiff = realToFrac $ done - now
         diff  = tDiff * 1000
-    liftIO $ eatExceptions $ Metric.push sink $ Metric.Timer namespace bucket diff
+    liftIO $ eatExceptions $ Metric.push sink $ metricTimer diff
     return opVal
+  where
+    metricTimer = Metric.Timer namespace bucket
+
+----------------------------------------------------------------
 
 {-  * Utility Methods for raw message sending/recieving interactions
 
@@ -126,6 +134,8 @@ getMessage = do
 
 getEndpoint :: Message -> String
 getEndpoint = fromJust . pushEndpoint
+
+----------------------------------------------------------------
 
 {-  * Validity assertions to ensure operations work properly
 
@@ -150,6 +160,8 @@ assertEndpointMatch cid msg = do
   where
     cids = fromJust $ updates msg
     cid' = fromJust cid
+
+----------------------------------------------------------------
 
 {-  * Basic SimplePush style interaction commands
 
@@ -210,6 +222,8 @@ randomElement xs = liftIO $ generate (elements xs)
 randomNumber :: (Int, Int) -> Interaction Int
 randomNumber (l, u) = liftIO $ generate $ choose (l, u)
 
+----------------------------------------------------------------
+
 {-  * Utility methods for parsing messages and generating components
 
 -}
@@ -217,7 +231,7 @@ randomNumber (l, u) = liftIO $ generate $ choose (l, u)
 -- | Send a PUT request to a notification point
 send :: Wreq.Session -> String -> Version -> IO ()
 send sess ep ver =
-    void $ forkIO $ void . eatExceptions $ Wreq.put sess ep $ serializeVersion ver
+    void $ forkIO $ eatExceptions $ Wreq.put sess ep $ serializeVersion ver
 
 -- | Serialize the version to a bytestring for sending
 serializeVersion :: Version -> BL.ByteString
