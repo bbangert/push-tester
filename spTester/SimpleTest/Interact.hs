@@ -17,6 +17,7 @@ module SimpleTest.Interact
     , randomChannelId
     , randomElement
     , randomNumber
+    , randomChoice
 
       -- ** Interaction Message manipulation commands
     , getEndpoint
@@ -44,6 +45,7 @@ import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
+import qualified Data.Sequence              as S
 import           Data.String                (fromString)
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
@@ -221,6 +223,11 @@ randomElement xs = liftIO $ generate (elements xs)
 
 randomNumber :: (Int, Int) -> Interaction Int
 randomNumber (l, u) = liftIO $ generate $ choose (l, u)
+
+randomChoice :: S.Seq a -> Interaction a
+randomChoice vec = do
+    i <- randomNumber (0, S.length vec - 1)
+    return $ S.index vec i
 
 ----------------------------------------------------------------
 

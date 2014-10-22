@@ -152,21 +152,21 @@ setupNewEndpoint = do
 basic :: Interaction ()
 basic = do
     void $ helo Nothing (Just [])
-    ep <- setupNewEndpoint
+    endpoint <- setupNewEndpoint
     forever $ do
-        void $ sendPushNotification ep Nothing
+        void $ sendPushNotification endpoint Nothing
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
 pingDeliver :: Interaction ()
 pingDeliver = do
-    _ <- helo Nothing (Just [])
+    void $ helo Nothing (Just [])
     endpoint <- setupNewEndpoint
     loop 0 endpoint
   where
     loop :: Int -> (ChannelID, Endpoint) -> Interaction ()
     loop count endpoint = do
-        _ <- sendPushNotification endpoint Nothing
+        void $ sendPushNotification endpoint Nothing
         if count == 20 then do
             void ping
             wait 10
@@ -183,13 +183,14 @@ channelMonster = do
     loop 0 S.empty
   where
     loop :: Int -> S.Seq (ChannelID, Endpoint) -> Interaction ()
-    loop count eps = do
-        eps' <- if count `mod` 10 == 0 then do
-                    endpoint <- setupNewEndpoint
-                    return $ eps |> endpoint
-                else return eps
-        i <- randomNumber (0, S.length eps' - 1)
-        let ep = S.index eps' i
-        void $ sendPushNotification ep Nothing
+    loop count endpoints = do
+        endpoints' <- updatedEndpoints
+        endpoint <- randomChoice endpoints'
+        void $ sendPushNotification endpoint Nothing
         wait 5
-        loop (count+5) eps'
+        loop (count+5) endpoints'
+      where
+        -- Returns endpoints to use, prepending a new one every 10 seconds
+        updatedEndpoints
+            | count `mod` 10 == 0 = (endpoints |>) <$> setupNewEndpoint
+            | otherwise           = return endpoints
