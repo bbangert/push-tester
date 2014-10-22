@@ -192,7 +192,7 @@ channelMonster = do
       where
         -- Returns endpoints to use, prepending a new one every 10 seconds
         updatedEndpoints
-            | addEndpoint = prependEndpoint <$> setupNewEndpoint
-            | otherwise   = return endpoints
-        addEndpoint = count `mod` 10 == 0
+            | shouldAddEndpoint = prependEndpoint <$> setupNewEndpoint
+            | otherwise         = return endpoints
+        shouldAddEndpoint = count `mod` 10 == 0
         prependEndpoint = (endpoints |>)
