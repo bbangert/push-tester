@@ -13,8 +13,7 @@ import           Test.QuickCheck         (Arbitrary (..), Gen,
                                           arbitrary, elements, listOf1,
                                           vectorOf)
 
-import           SimpleTest.Types (ChannelID, ChannelIDs, Endpoint, Uaid,
-                                   Version)
+import           SimpleTest.Types (ChannelID, Uaid)
 
 newtype AnyUaid = AnyUaid Uaid deriving (Show)
 newtype ValidUaid = ValidUaid Uaid deriving (Show)

@@ -5,20 +5,22 @@
 module PushClient
     ( mkMessage
     , receiveMessage
+    , sendMessage
     , sendReceiveMessage
     , Message (..)
     , ChannelUpdate (..)
     ) where
 
 --------------------------------------------------------------------------------
-import           Data.Aeson           (FromJSON, ToJSON, eitherDecode, encode,
-                                       genericParseJSON, genericToJSON,
-                                       parseJSON, toJSON)
-import           Data.Aeson.Types     (defaultOptions, fieldLabelModifier,
-                                       omitNothingFields)
-import           Data.Text            (Text)
+import           Control.Monad      (void)
+import           Data.Aeson         (FromJSON, ToJSON, eitherDecode, encode,
+                                     genericParseJSON, genericToJSON, parseJSON,
+                                     toJSON)
+import           Data.Aeson.Types   (defaultOptions, fieldLabelModifier,
+                                     omitNothingFields)
+import           Data.Text          (Text)
 import           GHC.Generics
-import qualified Network.WebSockets   as WS
+import qualified Network.WebSockets as WS
 
 -- Generic Message construct for easy JSON encode/decode
 data Message = Message { messageType  :: !String
@@ -52,6 +54,12 @@ receiveMessage conn = do
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
 sendReceiveMessage msg conn = do
-  let eMsg = encode msg
-  WS.sendTextData conn eMsg
-  receiveMessage conn
+    WS.sendTextData conn eMsg
+    receiveMessage conn
+  where
+    eMsg = encode msg
+
+sendMessage :: Message -> WS.ClientApp ()
+sendMessage msg conn = void $ WS.sendTextData conn eMsg
+  where
+    eMsg = encode msg

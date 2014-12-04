@@ -10,6 +10,7 @@ module SimpleTest.Interact
     , register
     , unregister
     , ping
+    , ack
     , sendPushNotification
 
       -- ** Interaction helpers
@@ -56,7 +57,7 @@ import           Test.QuickCheck.Gen        (Gen, choose, elements, generate)
 
 import           PushClient                 (ChannelUpdate (..), Message (..),
                                              mkMessage, receiveMessage,
-                                             sendReceiveMessage)
+                                             sendMessage, sendReceiveMessage)
 
 import           SimpleTest.Types           (ChannelID, ChannelIDs, Endpoint,
                                              Uaid, Version)
@@ -126,7 +127,13 @@ withTimer namespace bucket sink op = do
 sendRecieve :: Message -> Interaction Message
 sendRecieve msg = do
     conn <- iconn <$> ask
-    liftIO (sendReceiveMessage msg conn)
+    liftIO $ sendReceiveMessage msg conn
+
+-- | Send a message without a response
+send :: Message -> Interaction ()
+send msg = do
+  conn <- iconn <$> ask
+  void $ liftIO $ sendMessage msg conn
 
 -- | Get a message
 getMessage :: Interaction Message
@@ -157,11 +164,11 @@ assertStatus200 msg = assert (msgStatus == 200, msg) "message status not 200."
 assertEndpointMatch :: ChannelID -> Message -> Interaction ()
 assertEndpointMatch cid msg = do
     assert (length cids == 1, cids) "channel updates is longer than 1."
-    let updateCid = cu_channelID $ head cids
     assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch."
   where
     cids = fromJust $ updates msg
     cid' = fromJust cid
+    updateCid = cu_channelID $ head cids
 
 ----------------------------------------------------------------
 
@@ -190,12 +197,18 @@ unregister cid = sendRecieve unregisterMsg
   where
     unregisterMsg = mkMessage {messageType="unregister", channelID=cid}
 
+-- | Ack a notification
+ack :: Message -> Interaction ()
+ack msg = send ackMsg
+  where
+    ackMsg = mkMessage {messageType="ack", channelIDs=channelIDs msg}
+
 sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
 sendPushNotification (cid, endpoint) ver = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
     msg <- withTimer "simplepush.client" "pushNotification" sink $ do
-            liftIO $ send sess endpoint ver
+            liftIO $ sendNotification sess endpoint ver
             getMessage
     assertEndpointMatch cid msg
     return msg
@@ -236,8 +249,8 @@ randomChoice vec = do
 -}
 
 -- | Send a PUT request to a notification point
-send :: Wreq.Session -> String -> Version -> IO ()
-send sess ep ver =
+sendNotification :: Wreq.Session -> String -> Version -> IO ()
+sendNotification sess ep ver =
     void $ forkIO $ eatExceptions $ Wreq.put sess ep $ serializeVersion ver
 
 -- | Serialize the version to a bytestring for sending
