@@ -24,20 +24,12 @@ import           SimpleTest.Interact
 
 ----------------------------------------------------------------
 
-exceptionToUsage :: IO a -> IO (Maybe a)
-exceptionToUsage m = (Just <$> m) `E.catch` \(_ :: E.SomeException) -> do
-    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
-    return Nothing
-
-----------------------------------------------------------------
-
 -- | Main function to parse arguments and kick off the tester
 main :: IO ()
-main = parseArguments >>= maybe (return ()) runTester
+main = getArgs >>= parseArguments >>= maybe (return ()) runTester
 
-parseArguments :: IO (Maybe (TestConfig, TestInteraction (), Int))
-parseArguments = exceptionToUsage $ do
-    [ip, port, spawnCount, strategy, statsdHost] <- getArgs
+parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Int))
+parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     let (sHostname:sPort:[]) = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
@@ -51,7 +43,10 @@ parseArguments = exceptionToUsage $ do
     clientTracker <- newClientTracker maxC
 
     let tconfig = TC ip (read port) clientTracker newStorage sink sess
-    return (tconfig, fromJust interaction, maxC)
+    return $ Just (tconfig, fromJust interaction, maxC)
+parseArguments _ = do
+    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
+    return Nothing
 
 -- | Watches client tracking to echo data to stdout
 watcher :: ClientTracker -> IO () -> IO ()
