@@ -7,13 +7,12 @@ module SimpleTest.Util
   , AnyUaid (..)
   ) where
 
-import           Control.Applicative     ((<$>))
-import           Data.String             (fromString)
-import           Test.QuickCheck         (Arbitrary (..), Gen,
-                                          arbitrary, elements, listOf1,
-                                          vectorOf)
+import           Control.Applicative ((<$>))
+import           Data.String         (fromString)
+import           Test.QuickCheck     (Arbitrary (..), Gen, arbitrary, elements,
+                                      listOf1, vectorOf)
 
-import           SimpleTest.Types (ChannelID, Uaid)
+import           SimpleTest.Types    (ChannelID, Uaid)
 
 newtype AnyUaid = AnyUaid Uaid deriving (Show)
 newtype ValidUaid = ValidUaid Uaid deriving (Show)

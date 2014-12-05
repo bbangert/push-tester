@@ -1,11 +1,15 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module SimpleTest.Interact
     ( -- * Interaction type and commands
       Interaction
+    , TestInteraction
     , runInteraction
+    , runTestInteraction
+    , withConnection
     , helo
     , register
     , unregister
@@ -31,8 +35,12 @@ module SimpleTest.Interact
     , Version
     , Storage
     , Config
+    , ClientTracker(..)
+    , TestConfig(..)
     , newStorage
     , newConfig
+    , newClientTracker
+    , eatExceptions
     ) where
 
 import           Control.Applicative        ((<$>))
@@ -40,10 +48,13 @@ import           Control.Concurrent         (forkIO, threadDelay)
 import qualified Control.Exception          as E
 import           Control.Monad              (void)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
-import           Control.Monad.State.Strict (StateT, runStateT)
+import           Control.Monad.State.Strict (MonadState (get, put), StateT,
+                                             runStateT)
 import           Control.Monad.Trans        (liftIO)
 import           Data.ByteString            (ByteString)
+import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as BL
+import           Data.IORef
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import qualified Data.Sequence              as S
@@ -80,8 +91,27 @@ data Config = IConfig
     , iSession :: !Wreq.Session
     }
 
+data ClientTracker = ClientTracker
+    { attempting :: IORef Int
+    , maxClients :: !Int
+    }
+
+data TestConfig = TC
+    { tcHostip      :: String
+    , tcPort        :: Int
+    , tcTracker     :: ClientTracker
+    , tcInitStorage :: Storage
+    , tcStatsd      :: Metric.AnySink
+    , tcSession     :: Wreq.Session
+    }
+
 -- | Interaction monad transformer for a simplePush interaction
 type Interaction = ReaderT Config (StateT Storage IO)
+
+-- | Testing monad transformer for a simplePush interaction
+type TestInteraction = StateT TestConfig IO
+
+----------------------------------------------------------------
 
 newStorage :: Storage
 newStorage = Storage Map.empty
@@ -89,9 +119,33 @@ newStorage = Storage Map.empty
 newConfig :: WS.Connection -> Metric.AnySink -> Wreq.Session -> Config
 newConfig = IConfig
 
+newClientTracker :: Int -> IO ClientTracker
+newClientTracker m = do
+    attempts <- newIORef 0
+    return $ ClientTracker attempts m
+
 -- | Run a complete websocket client interaction
 runInteraction :: Interaction a -> Config -> Storage -> IO (a, Storage)
 runInteraction interaction config = runStateT (runReaderT interaction config)
+
+-- | Run a test interaction
+runTestInteraction :: TestInteraction a -> TestConfig -> IO (a, TestConfig)
+runTestInteraction = runStateT
+
+-- | Run an interaction in a test interaction
+withConnection :: Interaction a -> TestInteraction a
+withConnection interaction = do
+    tc@TC{..} <- get
+    let runClient = WS.runClientWith tcHostip tcPort "/"
+                    WS.defaultConnectionOptions (originHeader tcHostip tcPort)
+    (resp, store) <- liftIO $ runClient $ \conn -> do
+        let config = newConfig conn tcStatsd tcSession
+        runInteraction interaction config tcInitStorage
+    put $ tc { tcInitStorage = store }
+    return resp
+  where
+    originHeader host port = [("Origin", BC.concat ["http://", BC.pack host,
+                                                    ":", BC.pack $ show port])]
 
 ----------------------------------------------------------------
 

@@ -53,11 +53,7 @@ receiveMessage conn = do
     either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
-sendReceiveMessage msg conn = do
-    WS.sendTextData conn eMsg
-    receiveMessage conn
-  where
-    eMsg = encode msg
+sendReceiveMessage msg conn = sendMessage msg conn >> receiveMessage conn
 
 sendMessage :: Message -> WS.ClientApp ()
 sendMessage msg conn = void $ WS.sendTextData conn eMsg

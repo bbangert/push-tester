@@ -1,55 +1,28 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
-import           Control.Applicative   ((<$>))
-import           Control.Concurrent    (forkIO, runInUnboundThread, threadDelay)
-import qualified Control.Exception     as E
-import           Control.Monad         (forever, replicateM_, void, when)
-import qualified Data.ByteString.Char8 as BC
+import           Control.Applicative  ((<$>))
+import           Control.Concurrent   (forkIO, runInUnboundThread, threadDelay)
+import qualified Control.Exception    as E
+import           Control.Monad        (forever, replicateM_, void, when)
 import           Data.IORef
-import           Data.List.Split       (splitOn)
-import qualified Data.Map.Strict       as Map
-import           Data.Maybe            (fromJust, isNothing)
-import           Data.Sequence         ((|>))
-import qualified Data.Sequence         as S
-import qualified Network.Metric        as Metric
-import qualified Network.WebSockets    as WS
-import qualified Network.Wreq.Session  as Wreq
-import           System.Environment    (getArgs)
-import           Text.Printf           (printf)
+import           Data.List.Split      (splitOn)
+import qualified Data.Map.Strict      as Map
+import           Data.Maybe           (fromJust, isNothing)
+import           Data.Sequence        ((|>))
+import qualified Data.Sequence        as S
+import qualified Network.Metric       as Metric
+import qualified Network.Wreq.Session as Wreq
+import           System.Environment   (getArgs)
+import           Text.Printf          (printf)
 
 import           SimpleTest.Interact
 
 ----------------------------------------------------------------
-
-data ClientTracker = ClientTracker
-    { attempting :: IORef Int
-    , connected  :: IORef Int
-    , maxClients :: !Int
-    }
-
-data TestConfig = TC
-    { tcHostip      :: String
-    , tcPort        :: Int
-    , tcTracker     :: ClientTracker
-    , tcInitStorage :: Storage
-    , tcStatsd      :: Metric.AnySink
-    , tcSession     :: Wreq.Session
-    }
-
-newClientTracker :: Int -> IO ClientTracker
-newClientTracker m = do
-    attempts <- newIORef 0
-    conns  <- newIORef 0
-    return $ ClientTracker attempts conns m
-
-----------------------------------------------------------------
-
-eatExceptions :: IO a -> IO ()
-eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()
 
 exceptionToUsage :: IO a -> IO (Maybe a)
 exceptionToUsage m = (Just <$> m) `E.catch` \(_ :: E.SomeException) -> do
@@ -62,7 +35,7 @@ exceptionToUsage m = (Just <$> m) `E.catch` \(_ :: E.SomeException) -> do
 main :: IO ()
 main = parseArguments >>= maybe (return ()) runTester
 
-parseArguments :: IO (Maybe (TestConfig, Interaction (), Int))
+parseArguments :: IO (Maybe (TestConfig, TestInteraction (), Int))
 parseArguments = exceptionToUsage $ do
     [ip, port, spawnCount, strategy, statsdHost] <- getArgs
     let (sHostname:sPort:[]) = splitOn ":" statsdHost
@@ -82,42 +55,26 @@ parseArguments = exceptionToUsage $ do
 
 -- | Watches client tracking to echo data to stdout
 watcher :: ClientTracker -> IO () -> IO ()
-watcher (ClientTracker att conns m) spawn = forever $ do
+watcher ClientTracker{..} spawn = forever $ do
     threadDelay (5*1000000)
-    count <- readIORef conns
-    attempts <- readIORef att
-    printf "Clients Connected: %s\n" (show count)
-    let spawnCount = m - attempts
-    incRef spawnCount att
+    attempts <- readIORef attempting
+    printf "Clients Connected: %s\n" (show attempts)
+    let spawnCount = maxClients - attempts
+    incRef spawnCount attempting
     replicateM_ spawnCount spawn
 
-runTester :: (TestConfig, Interaction (), Int) -> IO ()
-runTester (testConfig, interaction, maxConnections) = runInUnboundThread $ do
-    incRef maxConnections (attempting clientTracker)
+runTester :: (TestConfig, TestInteraction (), Int) -> IO ()
+runTester (tc@TC{..}, interaction, maxConnections) = runInUnboundThread $ do
     replicateM_ maxConnections spawn
-    watcher clientTracker spawn
+    watcher tcTracker spawn
   where
-    spawn = startWs testConfig interaction
-    clientTracker = tcTracker testConfig
+    att = attempting tcTracker
+    inc = incRef 1 att
+    dec = decRef att
+    spawn = void . forkIO . eatExceptions $ E.bracket_ inc dec go
+    go = runTestInteraction interaction tc
 
 ----------------------------------------------------------------
-
-startWs :: TestConfig -> Interaction () -> IO ()
-startWs tc@(TC host port tracker _ _ _) i =
-    void . forkIO $ E.finally safeSpawn $ decRef (attempting tracker)
-  where
-    safeSpawn = eatExceptions spawn
-    spawn = WS.runClientWith host port "/" WS.defaultConnectionOptions
-              [("Origin", BC.concat ["http://", BC.pack host, ":", BC.pack $ show port])]
-              $ interactionTester tc i
-
-interactionTester :: TestConfig -> Interaction a -> WS.ClientApp ()
-interactionTester (TC _ _ (ClientTracker _ conns _) storage sink sess) i conn = do
-    incRef 1 conns
-    E.finally runit $ decRef conns
-  where
-    config = newConfig conn sink sess
-    runit = void $ runInteraction i config storage
 
 incRef :: Int -> IORef Int -> IO ()
 incRef v ref = void $ atomicModifyIORef' ref (\x -> (x+v, ()))
@@ -132,7 +89,7 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 -}
 
 -- | Mapping of all the valid interactions we support
-interactions :: Map.Map String (Interaction ())
+interactions :: Map.Map String (TestInteraction ())
 interactions = Map.fromList
     [ ("basic",    basic)
     , ("ping",     pingDeliver)
@@ -149,8 +106,8 @@ setupNewEndpoint = do
 
 -- | Basic single channel registration that sends a notification to itself
 --  every 5 seconds and never pings
-basic :: Interaction ()
-basic = do
+basic :: TestInteraction ()
+basic = withConnection $ do
     void $ helo Nothing (Just [])
     endpoint <- setupNewEndpoint
     forever $ do
@@ -158,8 +115,8 @@ basic = do
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
-pingDeliver :: Interaction ()
-pingDeliver = do
+pingDeliver :: TestInteraction ()
+pingDeliver = withConnection $ do
     void $ helo Nothing (Just [])
     endpoint <- setupNewEndpoint
     loop 0 endpoint
@@ -177,8 +134,8 @@ pingDeliver = do
 
 -- | Registers a new channel ID every 10 seconds
 --   Chooses a channel randomly every 5 seconds for delivery and sends a push
-channelMonster :: Interaction ()
-channelMonster = do
+channelMonster :: TestInteraction ()
+channelMonster = withConnection $ do
     void $ helo Nothing (Just [])
     loop 0 S.empty
   where
