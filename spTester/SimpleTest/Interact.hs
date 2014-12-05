@@ -23,6 +23,7 @@ module SimpleTest.Interact
     , randomElement
     , randomNumber
     , randomChoice
+    , assert
 
       -- ** Interaction Message manipulation commands
     , getEndpoint

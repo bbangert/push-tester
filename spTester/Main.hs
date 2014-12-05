@@ -20,6 +20,7 @@ import qualified Network.Wreq.Session as Wreq
 import           System.Environment   (getArgs)
 import           Text.Printf          (printf)
 
+import           PushClient           (Message (..))
 import           SimpleTest.Interact
 
 ----------------------------------------------------------------
@@ -89,6 +90,7 @@ interactions = Map.fromList
     [ ("basic",    basic)
     , ("ping",     pingDeliver)
     , ("channels", channelMonster)
+    , ("reconnecter", reconnecter)
     ]
 
 -- | A helper interaction that starts a new registration and returns a new
@@ -148,3 +150,32 @@ channelMonster = withConnection $ do
             | otherwise         = return endpoints
         shouldAddEndpoint = count `mod` 10 == 0
         prependEndpoint = (endpoints |>)
+
+-- | Registers a channel, sends a notification every 5 seconds,
+--   reconnects every 20
+reconnecter :: TestInteraction ()
+reconnecter = do
+    (uid, cid, endpoint) <- withConnection $ do
+        msg <- helo Nothing (Just [])
+        cid <- randomChannelId
+        endpoint <- getEndpoint <$> register cid
+        return (uaid msg, cid, endpoint)
+    reconnectLoop (uid, cid, endpoint)
+  where
+    reconnectLoop :: (Uaid, ChannelID, Endpoint) -> TestInteraction ()
+    reconnectLoop (uid, cid, endpoint) = do
+        sendNotifications
+        reconnectLoop (uid, cid, endpoint)
+      where
+        notificationLoop :: Int -> Interaction ()
+        notificationLoop 20 = return ()
+        notificationLoop count = do
+            void $ sendPushNotification (cid, endpoint) Nothing
+            wait 5
+            notificationLoop (count+5)
+        sendNotifications = withConnection $ do
+            msg <- helo uid (Just [fromJust cid])
+            let failMsg = concat ["Failed to retain UAID: ", show uid,
+                                  " Cid: ", show cid]
+            assert (uid==uaid msg, msg) failMsg
+            notificationLoop 0
