@@ -172,6 +172,18 @@ withTimer namespace bucket sink op = do
   where
     metricTimer = Metric.Timer namespace bucket
 
+-- | Send a counter increment
+incrementCounter :: ByteString      -- ^ Metric namespace
+                 -> ByteString      -- ^ Metric bucket name
+                 -> Integer         -- ^ Count to increment by
+                 -> Interaction ()
+incrementCounter namespace bucket count = do
+    sink <- iStat <$> ask
+    liftIO $ eatExceptions $ Metric.push sink counter
+    return ()
+  where
+    counter = Metric.Counter namespace bucket count
+
 ----------------------------------------------------------------
 
 {-  * Utility Methods for raw message sending/recieving interactions
@@ -262,7 +274,7 @@ sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
 sendPushNotification (cid, endpoint) ver = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
-    msg <- withTimer "simplepush.client" "pushNotification" sink $ do
+    msg <- withTimer "push_test.update" "latency" sink $ do
             liftIO $ sendNotification sess endpoint ver
             getMessage
     assertEndpointMatch cid msg
