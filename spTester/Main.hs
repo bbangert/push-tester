@@ -80,7 +80,7 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
 ----------------------------------------------------------------
 
-{- * SimplePush Client Interactions
+{- * SimplePush Client WebsocketInteractions
 
 -}
 
@@ -95,7 +95,7 @@ interactions = Map.fromList
 
 -- | A helper interaction that starts a new registration and returns a new
 --   endpoint for a channelID
-setupNewEndpoint :: Interaction (ChannelID, Endpoint)
+setupNewEndpoint :: WebsocketInteraction (ChannelID, Endpoint)
 setupNewEndpoint = do
     cid <- randomChannelId
     endpoint <- getEndpoint <$> register cid
@@ -118,7 +118,7 @@ pingDeliver = withConnection $ do
     endpoint <- setupNewEndpoint
     loop 0 endpoint
   where
-    loop :: Int -> (ChannelID, Endpoint) -> Interaction ()
+    loop :: Int -> (ChannelID, Endpoint) -> WebsocketInteraction ()
     loop count endpoint = do
         void $ sendPushNotification endpoint Nothing
         if count == 20 then do
@@ -136,7 +136,7 @@ channelMonster = withConnection $ do
     void $ helo Nothing (Just [])
     loop 0 S.empty
   where
-    loop :: Int -> S.Seq (ChannelID, Endpoint) -> Interaction ()
+    loop :: Int -> S.Seq (ChannelID, Endpoint) -> WebsocketInteraction ()
     loop count endpoints = do
         endpoints' <- updatedEndpoints
         endpoint <- randomChoice endpoints'
@@ -167,7 +167,7 @@ reconnecter = do
         sendNotifications
         reconnectLoop (uid, cid, endpoint)
       where
-        notificationLoop :: Int -> Interaction ()
+        notificationLoop :: Int -> WebsocketInteraction ()
         notificationLoop 20 = return ()
         notificationLoop count = do
             void $ sendPushNotification (cid, endpoint) Nothing

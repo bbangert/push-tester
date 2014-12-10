@@ -4,12 +4,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module SimpleTest.Interact
-    ( -- * Interaction type and commands
-      Interaction
-    , TestInteraction
-    , runInteraction
+    ( -- * TestInteraction type and commands
+      TestInteraction
     , runTestInteraction
     , withConnection
+
+      -- * WebsocketInteraction type and commands
+    , WebsocketInteraction
     , helo
     , register
     , unregister
@@ -17,7 +18,7 @@ module SimpleTest.Interact
     , ack
     , sendPushNotification
 
-      -- ** Interaction helpers
+      -- ** WebsocketInteraction helpers
     , wait
     , randomChannelId
     , randomElement
@@ -25,7 +26,7 @@ module SimpleTest.Interact
     , randomChoice
     , assert
 
-      -- ** Interaction Message manipulation commands
+      -- ** WebsocketInteraction Message manipulation commands
     , getEndpoint
 
       -- * Datatypes for interactions
@@ -79,12 +80,10 @@ import           SimpleTest.Util            (ValidChannelID (..))
 
 type Result = String
 
--- | Interaction datatypes
+-- | WebsocketInteraction datatypes
 type VariableStorage = Map.Map String Result
 
-data Storage = Storage
-    { _stVariables :: !VariableStorage
-    }
+data Storage = Storage !VariableStorage
 
 data Config = IConfig
     { iconn    :: !WS.Connection
@@ -106,8 +105,8 @@ data TestConfig = TC
     , tcSession     :: Wreq.Session
     }
 
--- | Interaction monad transformer for a simplePush interaction
-type Interaction = ReaderT Config (StateT Storage IO)
+-- | WebsocketInteraction monad transformer for a simplePush interaction
+type WebsocketInteraction = ReaderT Config (StateT Storage IO)
 
 -- | Testing monad transformer for a simplePush interaction
 type TestInteraction = StateT TestConfig IO
@@ -126,22 +125,31 @@ newClientTracker m = do
     return $ ClientTracker attempts m
 
 -- | Run a complete websocket client interaction
-runInteraction :: Interaction a -> Config -> Storage -> IO (a, Storage)
-runInteraction interaction config = runStateT (runReaderT interaction config)
+runWebsocketInteraction :: WebsocketInteraction a
+                        -> Config
+                        -> Storage
+                        -> IO (a, Storage)
+runWebsocketInteraction interaction config = runStateT (runReaderT interaction config)
 
 -- | Run a test interaction
 runTestInteraction :: TestInteraction a -> TestConfig -> IO (a, TestConfig)
 runTestInteraction = runStateT
 
+----------------------------------------------------------------
+
+{-  * TestInteraction commands
+
+-}
+
 -- | Run an interaction in a test interaction
-withConnection :: Interaction a -> TestInteraction a
+withConnection :: WebsocketInteraction a -> TestInteraction a
 withConnection interaction = do
     tc@TC{..} <- get
     let runClient = WS.runClientWith tcHostip tcPort "/"
                     WS.defaultConnectionOptions (originHeader tcHostip tcPort)
     (resp, store) <- liftIO $ runClient $ \conn -> do
         let config = newConfig conn tcStatsd tcSession
-        runInteraction interaction config tcInitStorage
+        runWebsocketInteraction interaction config tcInitStorage
     put $ tc { tcInitStorage = store }
     return resp
   where
@@ -159,8 +167,8 @@ withConnection interaction = do
 withTimer :: ByteString             -- ^ Metric namespace
           -> ByteString             -- ^ Metric bucket name
           -> Metric.AnySink         -- ^ Metric sink to use
-          -> Interaction a          -- ^ Interaction to run
-          -> Interaction a
+          -> WebsocketInteraction a          -- ^ WebsocketInteraction to run
+          -> WebsocketInteraction a
 withTimer namespace bucket sink op = do
     now <- liftIO getPOSIXTime
     opVal <- op
@@ -176,7 +184,7 @@ withTimer namespace bucket sink op = do
 incrementCounter :: ByteString      -- ^ Metric namespace
                  -> ByteString      -- ^ Metric bucket name
                  -> Integer         -- ^ Count to increment by
-                 -> Interaction ()
+                 -> WebsocketInteraction ()
 incrementCounter namespace bucket count = do
     sink <- iStat <$> ask
     liftIO $ eatExceptions $ Metric.push sink counter
@@ -191,19 +199,19 @@ incrementCounter namespace bucket count = do
 -}
 
 -- | Send a message and get a message in response
-sendRecieve :: Message -> Interaction Message
+sendRecieve :: Message -> WebsocketInteraction Message
 sendRecieve msg = do
     conn <- iconn <$> ask
     liftIO $ sendReceiveMessage msg conn
 
 -- | Send a message without a response
-send :: Message -> Interaction ()
+send :: Message -> WebsocketInteraction ()
 send msg = do
   conn <- iconn <$> ask
   void $ liftIO $ sendMessage msg conn
 
 -- | Get a message
-getMessage :: Interaction Message
+getMessage :: WebsocketInteraction Message
 getMessage = do
     conn <- iconn <$> ask
     liftIO (receiveMessage conn)
@@ -217,18 +225,18 @@ getEndpoint = fromJust . pushEndpoint
 
 -}
 
-assert :: Show a => (Bool, a) -> String -> Interaction ()
+assert :: Show a => (Bool, a) -> String -> WebsocketInteraction ()
 assert (True, _) _ = return ()
 assert (False, obj) msg = do
     liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ show obj
     fail "Abort"
 
-assertStatus200 :: Message -> Interaction ()
+assertStatus200 :: Message -> WebsocketInteraction ()
 assertStatus200 msg = assert (msgStatus == 200, msg) "message status not 200."
   where
     msgStatus = fromJust $ status msg
 
-assertEndpointMatch :: ChannelID -> Message -> Interaction ()
+assertEndpointMatch :: ChannelID -> Message -> WebsocketInteraction ()
 assertEndpointMatch cid msg = do
     assert (length cids == 1, cids) "channel updates is longer than 1."
     assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch."
@@ -239,18 +247,18 @@ assertEndpointMatch cid msg = do
 
 ----------------------------------------------------------------
 
-{-  * Basic SimplePush style interaction commands
+{-  * Basic SimplePush style websocket interaction commands
 
 -}
 
 -- | Say helo to a remote server
-helo :: Uaid -> ChannelIDs -> Interaction Message
+helo :: Uaid -> ChannelIDs -> WebsocketInteraction Message
 helo uid cids = sendRecieve heloMsg
   where
     heloMsg = mkMessage {messageType="hello", uaid=uid, channelIDs=cids}
 
 -- | Register a channel ID with a remote server
-register :: ChannelID -> Interaction Message
+register :: ChannelID -> WebsocketInteraction Message
 register cid = do
     msg <- sendRecieve registerMsg
     assertStatus200 msg
@@ -259,18 +267,18 @@ register cid = do
     registerMsg = mkMessage {messageType="register", channelID=cid}
 
 -- | Unregister a channel ID with a remote server
-unregister :: ChannelID -> Interaction Message
+unregister :: ChannelID -> WebsocketInteraction Message
 unregister cid = sendRecieve unregisterMsg
   where
     unregisterMsg = mkMessage {messageType="unregister", channelID=cid}
 
 -- | Ack a notification
-ack :: Message -> Interaction ()
+ack :: Message -> WebsocketInteraction ()
 ack msg = send ackMsg
   where
     ackMsg = mkMessage {messageType="ack", channelIDs=channelIDs msg}
 
-sendPushNotification :: (ChannelID, Endpoint) -> Version -> Interaction Message
+sendPushNotification :: (ChannelID, Endpoint) -> Version -> WebsocketInteraction Message
 sendPushNotification (cid, endpoint) ver = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
@@ -280,7 +288,7 @@ sendPushNotification (cid, endpoint) ver = do
     assertEndpointMatch cid msg
     return msg
 
-ping :: Interaction Bool
+ping :: WebsocketInteraction Bool
 ping = do
     conn <- iconn <$> ask
     liftIO $ WS.sendTextData conn ("{}" :: BL.ByteString)
@@ -288,23 +296,23 @@ ping = do
     return $ d == "{}"
 
 -- | Wait for a given amount of seconds
-wait :: Int -> Interaction ()
+wait :: Int -> WebsocketInteraction ()
 wait i = liftIO $ threadDelay (i * 1000000)
 
 -- | Generate a random valid channelID
-randomChannelId :: Interaction ChannelID
+randomChannelId :: WebsocketInteraction ChannelID
 randomChannelId = do
     (ValidChannelID cid) <- liftIO $ generate (arbitrary :: Gen ValidChannelID)
     return cid
 
 -- | Choose from a list randomly
-randomElement :: [a] -> Interaction a
+randomElement :: [a] -> WebsocketInteraction a
 randomElement xs = liftIO $ generate (elements xs)
 
-randomNumber :: (Int, Int) -> Interaction Int
+randomNumber :: (Int, Int) -> WebsocketInteraction Int
 randomNumber (l, u) = liftIO $ generate $ choose (l, u)
 
-randomChoice :: S.Seq a -> Interaction a
+randomChoice :: S.Seq a -> WebsocketInteraction a
 randomChoice vec = do
     i <- randomNumber (0, S.length vec - 1)
     return $ S.index vec i
