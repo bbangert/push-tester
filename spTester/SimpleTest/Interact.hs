@@ -18,7 +18,7 @@ module SimpleTest.Interact
     , ack
     , sendPushNotification
 
-      -- ** WebsocketInteraction helpers
+      -- ** General MonadIO helpers
     , wait
     , randomChannelId
     , randomElement
@@ -49,6 +49,7 @@ import           Control.Applicative        ((<$>))
 import           Control.Concurrent         (forkIO, threadDelay)
 import qualified Control.Exception          as E
 import           Control.Monad              (void)
+import           Control.Monad.IO.Class     (MonadIO)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
 import           Control.Monad.State.Strict (MonadState (get, put), StateT,
                                              runStateT)
@@ -225,18 +226,18 @@ getEndpoint = fromJust . pushEndpoint
 
 -}
 
-assert :: Show a => (Bool, a) -> String -> WebsocketInteraction ()
+assert :: (Show a, MonadIO m) => (Bool, a) -> String -> m ()
 assert (True, _) _ = return ()
 assert (False, obj) msg = do
     liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ show obj
     fail "Abort"
 
-assertStatus200 :: Message -> WebsocketInteraction ()
+assertStatus200 :: MonadIO m => Message -> m ()
 assertStatus200 msg = assert (msgStatus == 200, msg) "message status not 200."
   where
     msgStatus = fromJust $ status msg
 
-assertEndpointMatch :: ChannelID -> Message -> WebsocketInteraction ()
+assertEndpointMatch :: MonadIO m => ChannelID -> Message -> m ()
 assertEndpointMatch cid msg = do
     assert (length cids == 1, cids) "channel updates is longer than 1."
     assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch."
@@ -295,24 +296,30 @@ ping = do
     (d :: BL.ByteString) <- liftIO $ WS.receiveData conn
     return $ d == "{}"
 
+----------------------------------------------------------------
+
+{-  * MonadIO utility methods
+
+-}
+
 -- | Wait for a given amount of seconds
-wait :: Int -> WebsocketInteraction ()
+wait :: MonadIO m => Int -> m ()
 wait i = liftIO $ threadDelay (i * 1000000)
 
 -- | Generate a random valid channelID
-randomChannelId :: WebsocketInteraction ChannelID
+randomChannelId :: MonadIO m => m ChannelID
 randomChannelId = do
     (ValidChannelID cid) <- liftIO $ generate (arbitrary :: Gen ValidChannelID)
     return cid
 
 -- | Choose from a list randomly
-randomElement :: [a] -> WebsocketInteraction a
+randomElement :: MonadIO m => [a] -> m a
 randomElement xs = liftIO $ generate (elements xs)
 
-randomNumber :: (Int, Int) -> WebsocketInteraction Int
+randomNumber :: MonadIO m => (Int, Int) -> m Int
 randomNumber (l, u) = liftIO $ generate $ choose (l, u)
 
-randomChoice :: S.Seq a -> WebsocketInteraction a
+randomChoice :: MonadIO m => S.Seq a -> m a
 randomChoice vec = do
     i <- randomNumber (0, S.length vec - 1)
     return $ S.index vec i
