@@ -20,8 +20,9 @@ import qualified Network.Wreq.Session as Wreq
 import           System.Environment   (getArgs)
 import           Text.Printf          (printf)
 
-import           PushClient           (Message (..))
+import           PushClient           (ChannelUpdate (..), Message (..))
 import           SimpleTest.Interact
+import           SimpleTest.Types     (Notification (..))
 
 ----------------------------------------------------------------
 
@@ -84,6 +85,9 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
 -}
 
+emptyNotification :: Notification
+emptyNotification = Notification Nothing Nothing
+
 -- | Mapping of all the valid interactions we support
 interactions :: Map.Map String (TestInteraction ())
 interactions = Map.fromList
@@ -91,6 +95,7 @@ interactions = Map.fromList
     , ("ping",     pingDeliver)
     , ("channels", channelMonster)
     , ("reconnecter", reconnecter)
+    , ("datasender", dataSender)
     ]
 
 -- | A helper interaction that starts a new registration and returns a new
@@ -108,7 +113,8 @@ basic = withConnection $ do
     void $ helo Nothing (Just [])
     endpoint <- setupNewEndpoint
     forever $ do
-        void $ sendPushNotification endpoint Nothing
+        msg <- sendPushNotification endpoint emptyNotification
+        ack msg
         wait 5
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
@@ -120,7 +126,8 @@ pingDeliver = withConnection $ do
   where
     loop :: Int -> (ChannelID, Endpoint) -> WebsocketInteraction ()
     loop count endpoint = do
-        void $ sendPushNotification endpoint Nothing
+        msg <- sendPushNotification endpoint emptyNotification
+        ack msg
         if count == 20 then do
             void ping
             wait 10
@@ -140,7 +147,8 @@ channelMonster = withConnection $ do
     loop count endpoints = do
         endpoints' <- updatedEndpoints
         endpoint <- randomChoice endpoints'
-        void $ sendPushNotification endpoint Nothing
+        msg <- sendPushNotification endpoint emptyNotification
+        ack msg
         wait 5
         loop (count+5) endpoints'
       where
@@ -167,15 +175,41 @@ reconnecter = do
         sendNotifications
         reconnectLoop (uid, cid, endpoint)
       where
+        failMsg :: String
+        failMsg = concat ["Failed to retain UAID: ", show uid, " Cid: ",
+                          show cid]
         notificationLoop :: Int -> WebsocketInteraction ()
         notificationLoop 20 = return ()
         notificationLoop count = do
-            void $ sendPushNotification (cid, endpoint) Nothing
+            msg <- sendPushNotification (cid, endpoint) emptyNotification
+            ack msg
             wait 5
             notificationLoop (count+5)
         sendNotifications = withConnection $ do
             msg <- helo uid (Just [fromJust cid])
-            let failMsg = concat ["Failed to retain UAID: ", show uid,
-                                  " Cid: ", show cid]
             assert (uid==uaid msg, msg) failMsg
             notificationLoop 0
+
+-- | Registers a channel, sends a notification with data every 5 seconds,
+--   pings every 20
+dataSender :: TestInteraction ()
+dataSender = withConnection $ do
+    void $ helo Nothing (Just [])
+    endpoint <- setupNewEndpoint
+    loop 0 endpoint
+  where
+    loop :: Int -> (ChannelID, Endpoint) -> WebsocketInteraction ()
+    loop count endpoint = do
+        len <- randomNumber (10, 4000)
+        dat <- randomData len
+        msg <- sendPushNotification endpoint (Notification Nothing (Just dat))
+        ack msg
+        let msgData = fromJust . cu_data . head . fromJust $ updates msg
+        assert (dat==msgData, msg) "Data failed to match"
+        if count == 20 then do
+            void ping
+            wait 5
+            loop 5 endpoint
+        else do
+            wait 5
+            loop (count+5) endpoint

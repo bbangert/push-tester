@@ -37,9 +37,11 @@ instance FromJSON Message
 
 data ChannelUpdate = ChannelUpdate { cu_channelID :: !String
                                    , cu_version   :: !Int
+                                   , cu_data      :: !(Maybe String)
                                    } deriving (Show, Eq, Generic)
 instance ToJSON ChannelUpdate where
-    toJSON = genericToJSON $ defaultOptions { fieldLabelModifier = drop 3 }
+    toJSON = genericToJSON $ defaultOptions { fieldLabelModifier = drop 3
+                                            , omitNothingFields = True }
 instance FromJSON ChannelUpdate where
     parseJSON = genericParseJSON $ defaultOptions { fieldLabelModifier = drop 3 }
 

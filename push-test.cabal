@@ -64,6 +64,8 @@ Executable spTester
     , network       >= 2.5
     , time          >= 1.4
     , transformers  >= 0.4.2.0
+    , http-client   >= 0.4.2.2
+    , http-types    >= 0.8.5
 
 Test-suite pushclient-tests
   Type:           exitcode-stdio-1.0
