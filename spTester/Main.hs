@@ -47,7 +47,7 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     let tconfig = TC ip (read port) clientTracker newStorage sink sess
     return $ Just (tconfig, fromJust interaction, maxC)
 parseArguments _ = do
-    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
+    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
 
 -- | Watches client tracking to echo data to stdout
