@@ -8,6 +8,7 @@ module SimpleTest.Interact
       TestInteraction
     , runTestInteraction
     , withConnection
+    , getSetting
 
       -- * WebsocketInteraction type and commands
     , WebsocketInteraction
@@ -104,6 +105,7 @@ data TestConfig = TC
     , tcInitStorage :: Storage
     , tcStatsd      :: Metric.AnySink
     , tcSession     :: Wreq.Session
+    , tcSettings     :: Map.Map String Int
     }
 
 -- | WebsocketInteraction monad transformer for a simplePush interaction
@@ -156,6 +158,12 @@ withConnection interaction = do
   where
     originHeader host port = [("Origin", BC.concat ["http://", BC.pack host,
                                                     ":", BC.pack $ show port])]
+
+-- | Get an env setting from the map
+getSetting :: String -> TestInteraction Int
+getSetting name = do
+    TC{..} <- get
+    return (fromJust $ Map.lookup name tcSettings)
 
 ----------------------------------------------------------------
 

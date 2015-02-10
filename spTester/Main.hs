@@ -6,9 +6,11 @@
 module Main where
 
 import           Control.Applicative  ((<$>))
+import           Control.Arrow        (second)
 import           Control.Concurrent   (forkIO, runInUnboundThread, threadDelay)
 import qualified Control.Exception    as E
 import           Control.Monad        (forever, replicateM_, void, when)
+import           Control.Monad.Trans  (liftIO)
 import           Data.IORef
 import           Data.List.Split      (splitOn)
 import qualified Data.Map.Strict      as Map
@@ -18,6 +20,7 @@ import qualified Data.Sequence        as S
 import qualified Network.Metric       as Metric
 import qualified Network.Wreq.Session as Wreq
 import           System.Environment   (getArgs)
+import           System.Posix.Env     (getEnv)
 import           Text.Printf          (printf)
 
 import           PushClient           (Message (..))
@@ -31,7 +34,7 @@ main = getArgs >>= parseArguments >>= maybe (return ()) runTester
 
 parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Int))
 parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
-    let (sHostname:sPort:[]) = splitOn ":" statsdHost
+    let [sHostname, sPort] = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
@@ -43,8 +46,21 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
 
     clientTracker <- newClientTracker maxC
 
-    let tconfig = TC ip (read port) clientTracker newStorage sink sess
+    let defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
+                                        ("NOTIFICATION_COUNT", 20),
+                                        ("PING_DELAY", 20),
+                                        ("PING_COUNT", 10),
+                                        ("RECONNECT_DELAY", 5)]
+    let vars = Map.keys defaultSettings
+    envSettings <- zip vars <$> mapM getEnv vars
+    let actualSettings = Map.fromList $ readSecond $ dropNothings envSettings
+        settingsMap = Map.union actualSettings defaultSettings
+
+    let tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
     return $ Just (tconfig, fromJust interaction, maxC)
+  where
+    dropNothings = filter (isNothing . snd)
+    readSecond = map (second (read . fromJust))
 parseArguments _ = do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
     return Nothing
@@ -69,6 +85,7 @@ runTester (tc@TC{..}, interaction, maxConnections) = runInUnboundThread $ do
     dec = decRef att
     spawn = void . forkIO . eatExceptions $ E.bracket_ inc dec go
     go = runTestInteraction interaction tc
+
 
 ----------------------------------------------------------------
 
@@ -101,33 +118,45 @@ setupNewEndpoint = do
     endpoint <- getEndpoint <$> register cid
     return (cid, endpoint)
 
+
+afterDelay :: Int -> Int -> Int -> WebsocketInteraction a
+           -> WebsocketInteraction Int
+afterDelay now lastUse delay action
+    | now-lastUse > delay = action >> return now
+    | otherwise           = return lastUse
+
 -- | Basic single channel registration that sends a notification to itself
 --  every 5 seconds and never pings
 basic :: TestInteraction ()
-basic = withConnection $ do
-    void $ helo Nothing (Just [])
-    endpoint <- setupNewEndpoint
-    forever $ do
-        void $ sendPushNotification endpoint Nothing
-        wait 5
+basic = do
+    notifDelay <- getSetting "NOTIFICATION_DELAY"
+    withConnection $ do
+        void $ helo Nothing (Just [])
+        endpoint <- setupNewEndpoint
+        forever $ do
+            void $ sendPushNotification endpoint Nothing
+            wait notifDelay
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
 pingDeliver :: TestInteraction ()
-pingDeliver = withConnection $ do
-    void $ helo Nothing (Just [])
-    endpoint <- setupNewEndpoint
-    loop 0 endpoint
+pingDeliver = do
+    [notifDelay, pingDelay] <-
+        mapM getSetting ["NOTIFICATION_DELAY", "PING_DELAY"]
+    withConnection $ do
+        void $ helo Nothing (Just [])
+        endpoint <- setupNewEndpoint
+        loop 0 endpoint 0 0 notifDelay pingDelay
   where
-    loop :: Int -> (ChannelID, Endpoint) -> WebsocketInteraction ()
-    loop count endpoint = do
-        void $ sendPushNotification endpoint Nothing
-        if count == 20 then do
-            void ping
-            wait 10
-            loop 10 endpoint
-        else do
-            wait 10
-            loop (count+10) endpoint
+    loop :: Int -> (ChannelID, Endpoint)
+         -> Int -> Int
+         -> Int -> Int
+         -> WebsocketInteraction ()
+    loop count endpoint lastPing lastNotif notifDelay pingDelay = do
+        lastPing' <- afterDelay count lastPing pingDelay ping
+        lastNotif' <- afterDelay count lastNotif notifDelay $
+            sendPushNotification endpoint Nothing
+        wait 1
+        loop (count+1) endpoint lastPing' lastNotif' notifDelay pingDelay
 
 -- | Registers a new channel ID every 10 seconds
 --   Chooses a channel randomly every 5 seconds for delivery and sends a push
@@ -164,18 +193,22 @@ reconnecter = do
   where
     reconnectLoop :: (Uaid, ChannelID, Endpoint) -> TestInteraction ()
     reconnectLoop (uid, cid, endpoint) = do
-        sendNotifications
+        [reconDelay, notifDelay, notifCount] <-
+            mapM getSetting ["RECONNECT_DELAY", "NOTIFICATION_DELAY",
+                             "NOTIFICATION_COUNT"]
+        sendNotifications notifDelay notifCount
+        wait reconDelay
         reconnectLoop (uid, cid, endpoint)
       where
-        notificationLoop :: Int -> WebsocketInteraction ()
-        notificationLoop 20 = return ()
-        notificationLoop count = do
+        notificationLoop :: Int -> Int -> WebsocketInteraction ()
+        notificationLoop _ 0 = return ()
+        notificationLoop delay count = do
             void $ sendPushNotification (cid, endpoint) Nothing
-            wait 5
-            notificationLoop (count+5)
-        sendNotifications = withConnection $ do
+            wait delay
+            notificationLoop delay (count-1)
+        sendNotifications delay count = withConnection $ do
             msg <- helo uid (Just [fromJust cid])
             let failMsg = concat ["Failed to retain UAID: ", show uid,
                                   " Cid: ", show cid]
             assert (uid==uaid msg, msg) failMsg
-            notificationLoop 0
+            notificationLoop delay count
