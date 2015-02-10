@@ -15,7 +15,7 @@ import           Control.Monad.Trans  (liftIO)
 import           Data.IORef
 import           Data.List.Split      (splitOn)
 import qualified Data.Map.Strict      as Map
-import           Data.Maybe           (fromJust, isNothing)
+import           Data.Maybe           (fromJust, isJust, isNothing)
 import           Data.Sequence        ((|>))
 import qualified Data.Sequence        as S
 import qualified Network.Metric       as Metric
@@ -59,7 +59,7 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     envSettings <- zip vars <$> mapM getEnv vars
 
     let actualSettings = Map.fromList $
-            map (second $ read . fromJust) $ filter (isNothing . snd) envSettings
+            map (second $ read . fromJust) $ filter (isJust . snd) envSettings
         settingsMap = Map.union actualSettings defaultSettings
         tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
     return $ Just (tconfig, fromJust interaction, maxC)
@@ -70,32 +70,29 @@ parseArguments _ = do
 -- | Watches client tracking to echo data to stdout
 watcher :: ClientTracker -> IO () -> IO ()
 watcher ClientTracker{..} spawn = forever $ do
-    threadDelay (5*1000000)
     attempts <- readIORef attempting
     printf "Clients Connected: %s\n" (show attempts)
     let spawnCount = maxClients - attempts
-    incRef spawnCount attempting
     replicateM_ spawnCount spawn
+    wait 5
 
 runTester :: (TestConfig, TestInteraction (), Int) -> IO ()
 runTester (tc@TC{..}, interaction, maxConnections) = runInUnboundThread $ do
-    replicateM_ maxConnections spawn
     watcher tcTracker spawn
   where
     att = attempting tcTracker
     inc = incRef 1 att
     dec = decRef att
     spawn = void . forkIO . eatExceptions $ E.bracket_ inc dec go
-    go = runTestInteraction interaction tc
-
+    go = void $ runTestInteraction interaction tc
 
 ----------------------------------------------------------------
 
 incRef :: Int -> IORef Int -> IO ()
-incRef v ref = void $ atomicModifyIORef' ref (\x -> (x+v, ()))
+incRef v ref = atomicModifyIORef' ref (\x -> (x+v, ()))
 
 decRef :: IORef Int -> IO ()
-decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
+decRef ref = atomicModifyIORef' ref (\x -> (x-1, ()))
 
 ----------------------------------------------------------------
 
@@ -186,8 +183,7 @@ channelMonster = withConnection $ do
     loop count endpoints = do
         endpoints' <- updatedEndpoints
         endpoint <- randomChoice endpoints'
-        msg <- sendPushNotification endpoint emptyNotification
-        ack msg
+        sendPushNotification endpoint emptyNotification >>= ack
         wait 5
         loop (count+5) endpoints'
       where
@@ -224,8 +220,7 @@ reconnecter = do
         notificationLoop :: Int -> Int -> WebsocketInteraction ()
         notificationLoop _ 0 = return ()
         notificationLoop delay count = do
-            msg <- sendPushNotification (cid, endpoint) emptyNotification
-            ack msg
+            sendPushNotification (cid, endpoint) emptyNotification >>= ack
             wait delay
             notificationLoop delay (count-1)
         sendNotifications delay count = withConnection $ do

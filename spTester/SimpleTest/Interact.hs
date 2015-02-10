@@ -109,7 +109,7 @@ data TestConfig = TC
     , tcInitStorage :: Storage
     , tcStatsd      :: Metric.AnySink
     , tcSession     :: Wreq.Session
-    , tcSettings     :: Map.Map String Int
+    , tcSettings    :: Map.Map String Int
     }
 
 -- | WebsocketInteraction monad transformer for a simplePush interaction
