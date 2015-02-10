@@ -73,17 +73,17 @@ watcher ClientTracker{..} spawn = forever $ do
     attempts <- readIORef attempting
     printf "Clients Connected: %s\n" (show attempts)
     let spawnCount = maxClients - attempts
+    incRef spawnCount attempting
     replicateM_ spawnCount spawn
     wait 5
 
 runTester :: (TestConfig, TestInteraction (), Int) -> IO ()
-runTester (tc@TC{..}, interaction, maxConnections) = runInUnboundThread $ do
-    watcher tcTracker spawn
+runTester (tc@TC{..}, interaction, maxConnections) =
+    runInUnboundThread $ watcher tcTracker spawn
   where
     att = attempting tcTracker
-    inc = incRef 1 att
     dec = decRef att
-    spawn = void . forkIO . eatExceptions $ E.bracket_ inc dec go
+    spawn = void . forkIO . eatExceptions $ E.finally go dec
     go = void $ runTestInteraction interaction tc
 
 ----------------------------------------------------------------
@@ -130,13 +130,13 @@ setupNewEndpoint = do
 --   on whether or not enough of a delay has passed
 --   Returns the time to use as the new 'lastUsed' value.
 afterDelay :: WebsocketInteraction a -> Delay -> PossibleInteraction
-afterDelay action now lastUse delay
-    | now-lastUse > delay = action >> return now
-    | otherwise           = return lastUse
+afterDelay action delay now lastUse
+    | now-lastUse >= delay = action >> return now
+    | otherwise            = return lastUse
 
 -- | Helper to create a push notification PossibleInteraction
 pushAction :: (ChannelID, Endpoint) -> Delay -> PossibleInteraction
-pushAction endpoint delay = afterDelay push delay
+pushAction endpoint = afterDelay push
   where
     push = sendPushNotification endpoint emptyNotification >>= ack
 

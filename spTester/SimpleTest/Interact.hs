@@ -353,8 +353,7 @@ randomData len = liftIO $ generate $ vectorOf len hexChar
 
 -- | Send a PUT request to a notification point
 sendNotification :: Wreq.Session -> String -> Notification -> IO ()
-sendNotification sess ep notif =
-    void $ forkIO $ eatExceptions $ Wreq.put sess ep encNotif
+sendNotification sess ep notif = eatExceptions $ Wreq.put sess ep encNotif
   where encNotif = serializeNotification notif
 
 -- | Serialize the notification to a bytestring for sending
