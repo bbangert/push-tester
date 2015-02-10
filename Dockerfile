@@ -29,6 +29,9 @@ RUN cabal update
 RUN cabal install --only-dependencies --force-reinstalls
 RUN cabal configure
 RUN cabal build
-RUN cp dist/build/spTester/spTester /usr/bin/spTester
+RUN cp dist/build/spTester/spTester app/
+RUN mkdir -p app/libs
+RUN cp /usr/lib/x86_64-linux-gnu/libgmp.so.10* app/libs/
+RUN cp /usr/lib/x86_64-linux-gnu/librt.so* app/libs/
 
-ENTRYPOINT ["/usr/bin/spTester"]
+CMD docker build -t bbangert/simpletest /projects/simpletester/app

@@ -8,10 +8,9 @@ module Main where
 
 import           Control.Applicative  ((<$>))
 import           Control.Arrow        (second)
-import           Control.Concurrent   (forkIO, runInUnboundThread, threadDelay)
+import           Control.Concurrent   (forkIO, runInUnboundThread)
 import qualified Control.Exception    as E
 import           Control.Monad        (forever, replicateM_, void, when)
-import           Control.Monad.Trans  (liftIO)
 import           Data.IORef
 import           Data.List.Split      (splitOn)
 import qualified Data.Map.Strict      as Map
@@ -42,7 +41,7 @@ defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
                                 ("PING_COUNT", 10),
                                 ("RECONNECT_DELAY", 5)]
 
-parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Int))
+parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction ()))
 parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     let [sHostname, sPort] = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
@@ -62,7 +61,7 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
             map (second $ read . fromJust) $ filter (isJust . snd) envSettings
         settingsMap = Map.union actualSettings defaultSettings
         tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
-    return $ Just (tconfig, fromJust interaction, maxC)
+    return $ Just (tconfig, fromJust interaction)
 parseArguments _ = do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
@@ -77,8 +76,8 @@ watcher ClientTracker{..} spawn = forever $ do
     replicateM_ spawnCount spawn
     wait 5
 
-runTester :: (TestConfig, TestInteraction (), Int) -> IO ()
-runTester (tc@TC{..}, interaction, maxConnections) =
+runTester :: (TestConfig, TestInteraction ()) -> IO ()
+runTester (tc@TC{..}, interaction) =
     runInUnboundThread $ watcher tcTracker spawn
   where
     att = attempting tcTracker
@@ -239,8 +238,8 @@ dataSender = do
         void $ helo Nothing (Just [])
         endpoint <- setupNewEndpoint
         let pingAction = afterDelay ping pingDelay
-            pushAction = afterDelay (push notifMaxSize endpoint) notifDelay
-        runLoop [pingAction, pushAction]
+            notifAction = afterDelay (push notifMaxSize endpoint) notifDelay
+        runLoop [pingAction, notifAction]
   where
     push maxSize endpoint = do
         len <- randomNumber (10, maxSize)

@@ -48,7 +48,7 @@ module SimpleTest.Interact
     ) where
 
 import           Control.Applicative        ((<$>))
-import           Control.Concurrent         (forkIO, threadDelay)
+import           Control.Concurrent         (threadDelay)
 import qualified Control.Exception          as E
 import           Control.Monad              (void)
 import           Control.Monad.IO.Class     (MonadIO)
@@ -59,12 +59,10 @@ import           Control.Monad.Trans        (liftIO)
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Sequence              as S
-import           Data.String                (fromString)
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
 import qualified Network.WebSockets         as WS
