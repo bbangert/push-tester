@@ -25,6 +25,7 @@ module SimpleTest.Interact
     , randomElement
     , randomNumber
     , randomChoice
+    , randomData
     , assert
 
       -- ** WebsocketInteraction Message manipulation commands
@@ -58,24 +59,27 @@ import           Control.Monad.Trans        (liftIO)
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as BL
+import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
+import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Sequence              as S
 import           Data.String                (fromString)
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
 import qualified Network.WebSockets         as WS
+import           Network.Wreq               (FormParam ((:=)))
 import qualified Network.Wreq.Session       as Wreq
-import           Test.QuickCheck            (arbitrary)
+import           Test.QuickCheck            (arbitrary, vectorOf)
 import           Test.QuickCheck.Gen        (Gen, choose, elements, generate)
 
 import           PushClient                 (ChannelUpdate (..), Message (..),
                                              mkMessage, receiveMessage,
                                              sendMessage, sendReceiveMessage)
 
-import           SimpleTest.Types           (ChannelID, ChannelIDs, Endpoint,
-                                             Uaid, Version)
+import           SimpleTest.Types           (ChannelID, ChannelIDs, Data,
+                                             Endpoint, Notification (..), Uaid,
+                                             Version)
 import           SimpleTest.Util            (ValidChannelID (..))
 
 ----------------------------------------------------------------
@@ -285,14 +289,17 @@ unregister cid = sendRecieve unregisterMsg
 ack :: Message -> WebsocketInteraction ()
 ack msg = send ackMsg
   where
-    ackMsg = mkMessage {messageType="ack", channelIDs=channelIDs msg}
+    ackMsg = mkMessage {messageType="ack", updates=basicChans (updates msg)}
+    -- Strip out the data from the ack
+    basicChans = fmap $ map (\update -> update { cu_data=Nothing })
 
-sendPushNotification :: (ChannelID, Endpoint) -> Version -> WebsocketInteraction Message
-sendPushNotification (cid, endpoint) ver = do
+
+sendPushNotification :: (ChannelID, Endpoint) -> Notification -> WebsocketInteraction Message
+sendPushNotification (cid, endpoint) notif = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
     msg <- withTimer "push_test.update" "latency" sink $ do
-            liftIO $ sendNotification sess endpoint ver
+            liftIO $ sendNotification sess endpoint notif
             getMessage
     assertEndpointMatch cid msg
     return msg
@@ -332,6 +339,12 @@ randomChoice vec = do
     i <- randomNumber (0, S.length vec - 1)
     return $ S.index vec i
 
+hexChar :: Gen Char
+hexChar = elements (['a'..'f'] ++ ['0'..'9'])
+
+randomData :: MonadIO m => Int -> m String
+randomData len = liftIO $ generate $ vectorOf len hexChar
+
 ----------------------------------------------------------------
 
 {-  * Utility methods for parsing messages and generating components
@@ -339,15 +352,27 @@ randomChoice vec = do
 -}
 
 -- | Send a PUT request to a notification point
-sendNotification :: Wreq.Session -> String -> Version -> IO ()
-sendNotification sess ep ver =
-    void $ forkIO $ eatExceptions $ Wreq.put sess ep $ serializeVersion ver
+sendNotification :: Wreq.Session -> String -> Notification -> IO ()
+sendNotification sess ep notif = do
+    void $ forkIO $ eatExceptions $ Wreq.put sess ep encNotif
+  where encNotif = serializeNotification notif
+
+-- | Serialize the notification to a bytestring for sending
+serializeNotification :: Notification -> [FormParam]
+serializeNotification (Notification ver Nothing) = [serializeVersion ver]
+serializeNotification (Notification ver dat) = [encVer, encData]
+  where
+    encVer = serializeVersion ver
+    encData = serializeData dat
 
 -- | Serialize the version to a bytestring for sending
-serializeVersion :: Version -> BL.ByteString
-serializeVersion Nothing = "version="
-serializeVersion (Just ver) = BL.append "version=" $ esc ver
-  where esc = fromString . show
+serializeVersion :: Version -> FormParam
+serializeVersion Nothing = "version" := ("" :: String)
+serializeVersion (Just ver) = "version" := ver
+
+-- | Serialize the data to a bytestring
+serializeData :: Data -> FormParam
+serializeData dat = "data" := fromMaybe ("" :: String) dat
 
 eatExceptions :: IO a -> IO ()
 eatExceptions m = void m `E.catch` \(_ :: E.SomeException) -> return ()

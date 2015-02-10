@@ -23,8 +23,9 @@ import           System.Environment   (getArgs)
 import           System.Posix.Env     (getEnv)
 import           Text.Printf          (printf)
 
-import           PushClient           (Message (..))
+import           PushClient           (ChannelUpdate (..), Message (..))
 import           SimpleTest.Interact
+import           SimpleTest.Types     (Notification (..))
 
 ----------------------------------------------------------------
 
@@ -62,7 +63,7 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     dropNothings = filter (isNothing . snd)
     readSecond = map (second (read . fromJust))
 parseArguments _ = do
-    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels] STATSDHOST:STATSDPORT"
+    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
 
 -- | Watches client tracking to echo data to stdout
@@ -101,6 +102,9 @@ decRef ref = void $ atomicModifyIORef' ref (\x -> (x-1, ()))
 
 -}
 
+emptyNotification :: Notification
+emptyNotification = Notification Nothing Nothing
+
 -- | Mapping of all the valid interactions we support
 interactions :: Map.Map String (TestInteraction ())
 interactions = Map.fromList
@@ -108,6 +112,7 @@ interactions = Map.fromList
     , ("ping",     pingDeliver)
     , ("channels", channelMonster)
     , ("reconnecter", reconnecter)
+    , ("datasender", dataSender)
     ]
 
 -- | A helper interaction that starts a new registration and returns a new
@@ -134,7 +139,8 @@ basic = do
         void $ helo Nothing (Just [])
         endpoint <- setupNewEndpoint
         forever $ do
-            void $ sendPushNotification endpoint Nothing
+            msg <- sendPushNotification endpoint emptyNotification
+            ack msg
             wait notifDelay
 
 -- | Delivers a notification once every 10 seconds, pings every 20 seconds
@@ -154,7 +160,7 @@ pingDeliver = do
     loop count endpoint lastPing lastNotif notifDelay pingDelay = do
         lastPing' <- afterDelay count lastPing pingDelay ping
         lastNotif' <- afterDelay count lastNotif notifDelay $
-            sendPushNotification endpoint Nothing
+            sendPushNotification endpoint emptyNotification >>= ack
         wait 1
         loop (count+1) endpoint lastPing' lastNotif' notifDelay pingDelay
 
@@ -169,7 +175,8 @@ channelMonster = withConnection $ do
     loop count endpoints = do
         endpoints' <- updatedEndpoints
         endpoint <- randomChoice endpoints'
-        void $ sendPushNotification endpoint Nothing
+        msg <- sendPushNotification endpoint emptyNotification
+        ack msg
         wait 5
         loop (count+5) endpoints'
       where
@@ -200,15 +207,41 @@ reconnecter = do
         wait reconDelay
         reconnectLoop (uid, cid, endpoint)
       where
+        failMsg :: String
+        failMsg = concat ["Failed to retain UAID: ", show uid, " Cid: ",
+                          show cid]
         notificationLoop :: Int -> Int -> WebsocketInteraction ()
         notificationLoop _ 0 = return ()
         notificationLoop delay count = do
-            void $ sendPushNotification (cid, endpoint) Nothing
+            msg <- sendPushNotification (cid, endpoint) emptyNotification
+            ack msg
             wait delay
             notificationLoop delay (count-1)
         sendNotifications delay count = withConnection $ do
             msg <- helo uid (Just [fromJust cid])
-            let failMsg = concat ["Failed to retain UAID: ", show uid,
-                                  " Cid: ", show cid]
             assert (uid==uaid msg, msg) failMsg
             notificationLoop delay count
+
+-- | Registers a channel, sends a notification with data every 5 seconds,
+--   pings every 20
+dataSender :: TestInteraction ()
+dataSender = withConnection $ do
+    void $ helo Nothing (Just [])
+    endpoint <- setupNewEndpoint
+    loop 0 endpoint
+  where
+    loop :: Int -> (ChannelID, Endpoint) -> WebsocketInteraction ()
+    loop count endpoint = do
+        len <- randomNumber (10, 4000)
+        dat <- randomData len
+        msg <- sendPushNotification endpoint (Notification Nothing (Just dat))
+        ack msg
+        let msgData = fromJust . cu_data . head . fromJust $ updates msg
+        assert (dat==msgData, msg) "Data failed to match"
+        if count == 20 then do
+            void ping
+            wait 5
+            loop 5 endpoint
+        else do
+            wait 5
+            loop (count+5) endpoint
