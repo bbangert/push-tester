@@ -33,12 +33,20 @@ import           SimpleTest.Types     (Notification (..))
 main :: IO ()
 main = getArgs >>= parseArguments >>= maybe (return ()) runTester
 
+defaultSettings :: Map.Map String Int
+defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
+                                ("NOTIFICATION_COUNT", 20),
+                                ("PING_DELAY", 20),
+                                ("PING_COUNT", 10),
+                                ("RECONNECT_DELAY", 5)]
+
 parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Int))
 parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     let [sHostname, sPort] = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
+        vars = Map.keys defaultSettings
 
     when (isNothing interaction) $ fail "Bad interaction lookup"
 
@@ -46,22 +54,13 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     sess <- Wreq.withSession return
 
     clientTracker <- newClientTracker maxC
-
-    let defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
-                                        ("NOTIFICATION_COUNT", 20),
-                                        ("PING_DELAY", 20),
-                                        ("PING_COUNT", 10),
-                                        ("RECONNECT_DELAY", 5)]
-    let vars = Map.keys defaultSettings
     envSettings <- zip vars <$> mapM getEnv vars
-    let actualSettings = Map.fromList $ readSecond $ dropNothings envSettings
-        settingsMap = Map.union actualSettings defaultSettings
 
-    let tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
+    let actualSettings = Map.fromList $ 
+            map (second $ read . fromJust) $ filter (isNothing . snd) envSettings
+        settingsMap = Map.union actualSettings defaultSettings
+        tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
     return $ Just (tconfig, fromJust interaction, maxC)
-  where
-    dropNothings = filter (isNothing . snd)
-    readSecond = map (second (read . fromJust))
 parseArguments _ = do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
@@ -123,9 +122,14 @@ setupNewEndpoint = do
     endpoint <- getEndpoint <$> register cid
     return (cid, endpoint)
 
-
-afterDelay :: Int -> Int -> Int -> WebsocketInteraction a
-           -> WebsocketInteraction Int
+-- | Helper function that determines if the supplied action should be run based
+--   on whether or not enough of a delay has passed
+--   Returns the time to use as the new 'lastUsed' value.
+afterDelay :: Int                       -- Current 'time' in seconds
+           -> Int                       -- Last 'time' the action
+           -> Int                       -- Delay after which action runs
+           -> WebsocketInteraction a    -- Action to run, result is dropped.
+           -> WebsocketInteraction Int  -- Returns new 'lastUsed' value
 afterDelay now lastUse delay action
     | now-lastUse > delay = action >> return now
     | otherwise           = return lastUse
