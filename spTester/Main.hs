@@ -126,7 +126,7 @@ setupNewEndpoint = do
 --   on whether or not enough of a delay has passed
 --   Returns the time to use as the new 'lastUsed' value.
 afterDelay :: Int                       -- Current 'time' in seconds
-           -> Int                       -- Last 'time' the action
+           -> Int                       -- Last 'time' the action ran.
            -> Int                       -- Delay after which action runs
            -> WebsocketInteraction a    -- Action to run, result is dropped.
            -> WebsocketInteraction Int  -- Returns new 'lastUsed' value
