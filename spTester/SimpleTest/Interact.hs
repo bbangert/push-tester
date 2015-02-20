@@ -297,7 +297,7 @@ sendPushNotification (cid, endpoint) notif = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
     msg <- withTimer "push_test.update" "latency" sink $ do
-            liftIO $ sendNotification sess endpoint notif
+            sendNotification sess endpoint notif
             getMessage
     assertEndpointMatch cid msg
     return msg
@@ -350,8 +350,8 @@ randomData len = liftIO $ generate $ vectorOf len hexChar
 -}
 
 -- | Send a PUT request to a notification point
-sendNotification :: Wreq.Session -> String -> Notification -> IO ()
-sendNotification sess ep notif = eatExceptions $ Wreq.put sess ep encNotif
+sendNotification :: MonadIO m => Wreq.Session -> String -> Notification -> m ()
+sendNotification sess ep notif = liftIO $ eatExceptions $ Wreq.put sess ep encNotif
   where encNotif = serializeNotification notif
 
 -- | Serialize the notification to a bytestring for sending
