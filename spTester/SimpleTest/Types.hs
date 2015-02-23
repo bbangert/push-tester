@@ -32,7 +32,9 @@ type Endpoint = String
 type Updates = Int
 type Data = Maybe String
 
-data Notification = Notification Version Data deriving (Show)
+data Notification = Notification { notifVersion :: Version
+                                 , notifData    :: Data
+                                 } deriving (Show)
 
 
 instance Putable [(S.ByteString, S.ByteString)] where

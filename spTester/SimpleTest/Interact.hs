@@ -50,7 +50,7 @@ module SimpleTest.Interact
 import           Control.Applicative        ((<$>))
 import           Control.Concurrent         (threadDelay)
 import qualified Control.Exception          as E
-import           Control.Monad              (void)
+import           Control.Monad              (void, when)
 import           Control.Monad.IO.Class     (MonadIO)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
 import           Control.Monad.State.Strict (MonadState (get, put), StateT,
@@ -61,7 +61,7 @@ import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as BL
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, fromMaybe)
+import           Data.Maybe                 (fromJust, fromMaybe, isJust)
 import qualified Data.Sequence              as S
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
@@ -293,14 +293,19 @@ ack msg = send ackMsg
 
 
 sendPushNotification :: (ChannelID, Endpoint) -> Notification -> WebsocketInteraction Message
-sendPushNotification (cid, endpoint) notif = do
+sendPushNotification (cid, endpoint) notif@Notification{..} = do
     sess <- iSession <$> ask
     sink <- iStat <$> ask
     msg <- withTimer "push_test.update" "latency" sink $ do
             sendNotification sess endpoint notif
             getMessage
+    when hasData $
+        incrementCounter "push_test.notification.throughput" "bytes" msgLen
     assertEndpointMatch cid msg
     return msg
+  where
+    hasData = isJust notifData
+    msgLen = toInteger . length $ fromJust notifData
 
 ping :: WebsocketInteraction Bool
 ping = do
