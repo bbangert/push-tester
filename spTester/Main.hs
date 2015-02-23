@@ -224,7 +224,7 @@ reconnecter = do
             notificationLoop delay (count-1)
         sendNotifications delay count = withConnection $ do
             msg <- helo uid (Just [fromJust cid])
-            assert (uid==uaid msg, msg) failMsg
+            assert (uid==uaid msg, msg) failMsg "uaid_reset"
             notificationLoop delay count
 
 -- | Registers a channel, sends a notification with data every 5 seconds,
@@ -247,4 +247,4 @@ dataSender = do
         msg <- sendPushNotification endpoint (Notification Nothing (Just dat))
         ack msg
         let msgData = fromJust . cu_data . head . fromJust $ updates msg
-        assert (dat==msgData, msg) "Data failed to match"
+        assert (dat==msgData, msg) "Data failed to match" "data_mismatch"

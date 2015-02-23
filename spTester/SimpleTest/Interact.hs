@@ -2,6 +2,8 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module SimpleTest.Interact
     ( -- * TestInteraction type and commands
@@ -50,7 +52,7 @@ module SimpleTest.Interact
 import           Control.Applicative        ((<$>))
 import           Control.Concurrent         (threadDelay)
 import qualified Control.Exception          as E
-import           Control.Monad              (void, when)
+import           Control.Monad              (void)
 import           Control.Monad.IO.Class     (MonadIO)
 import           Control.Monad.Reader       (ReaderT, ask, runReaderT)
 import           Control.Monad.State.Strict (MonadState (get, put), StateT,
@@ -115,6 +117,16 @@ type WebsocketInteraction = ReaderT Config (StateT Storage IO)
 
 -- | Testing monad transformer for a simplePush interaction
 type TestInteraction = StateT TestConfig IO
+
+-- | Class that allows access to a Metric Sink
+class Monad m => HasSink m where
+    getSink :: m Metric.AnySink
+
+instance HasSink WebsocketInteraction where
+    getSink = iStat <$> ask
+
+instance HasSink TestInteraction where
+    getSink = tcStatsd <$> get
 
 ----------------------------------------------------------------
 
@@ -192,12 +204,13 @@ withTimer namespace bucket sink op = do
     metricTimer = Metric.Timer namespace bucket
 
 -- | Send a counter increment
-incrementCounter :: ByteString      -- ^ Metric namespace
+incrementCounter :: (HasSink m, MonadIO m) =>
+                    ByteString      -- ^ Metric namespace
                  -> ByteString      -- ^ Metric bucket name
                  -> Integer         -- ^ Count to increment by
-                 -> WebsocketInteraction ()
+                 -> m ()
 incrementCounter namespace bucket count = do
-    sink <- iStat <$> ask
+    sink <- getSink
     liftIO $ eatExceptions $ Metric.push sink counter
     return ()
   where
@@ -236,21 +249,29 @@ getEndpoint = fromJust . pushEndpoint
 
 -}
 
-assert :: (Show a, MonadIO m) => (Bool, a) -> String -> m ()
-assert (True, _) _ = return ()
-assert (False, obj) msg = do
+assert :: (Show a, MonadIO m, HasSink m)
+       => (Bool, a)  -- ^ Condition that must be true, and an object to show
+       -> String     -- ^ Error message to print
+       -> String     -- ^ Counter to increment
+       -> m ()
+assert (True, _) _ _ = return ()
+assert (False, obj) msg cntr = do
     liftIO $ putStrLn $ "Assert failed: " ++ msg ++ " \tObject: " ++ show obj
+    incrementCounter "push_test.assertfail" (BC.pack cntr) 1
     fail "Abort"
 
-assertStatus200 :: MonadIO m => Message -> m ()
-assertStatus200 msg = assert (msgStatus == 200, msg) "message status not 200."
+assertStatus200 :: (MonadIO m, HasSink m) => Message -> m ()
+assertStatus200 msg = assert (msgStatus == 200, msg)
+                      "message status not 200."
+                      ("not200status." ++ statusMsg)
   where
+    statusMsg = show msgStatus
     msgStatus = fromJust $ status msg
 
-assertEndpointMatch :: MonadIO m => ChannelID -> Message -> m ()
+assertEndpointMatch :: (MonadIO m, HasSink m) => ChannelID -> Message -> m ()
 assertEndpointMatch cid msg = do
-    assert (length cids == 1, cids) "channel updates is longer than 1."
-    assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch."
+    assert (length cids == 1, cids) "channel updates is longer than 1." "extra_updates"
+    assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch." "chan_id_mismatch"
   where
     cids = fromJust $ updates msg
     cid' = fromJust cid
@@ -291,7 +312,7 @@ ack msg = send ackMsg
     -- Strip out the data from the ack
     basicChans = fmap $ map (\update -> update { cu_data=Nothing })
 
-
+-- | Send a Push Notification and Receive it
 sendPushNotification :: (ChannelID, Endpoint) -> Notification -> WebsocketInteraction Message
 sendPushNotification (cid, endpoint) notif@Notification{..} = do
     sess <- iSession <$> ask
@@ -299,13 +320,15 @@ sendPushNotification (cid, endpoint) notif@Notification{..} = do
     msg <- withTimer "push_test.update" "latency" sink $ do
             sendNotification sess endpoint notif
             getMessage
-    when hasData $
-        incrementCounter "push_test.notification.throughput" "bytes" msgLen
+    incDataCounter notifData
     assertEndpointMatch cid msg
     return msg
   where
-    hasData = isJust notifData
-    msgLen = toInteger . length $ fromJust notifData
+    incDataCounter Nothing = return ()
+    incDataCounter (Just d) =
+        incrementCounter "push_test.notification.throughput" "bytes"
+            (msgLen d)
+    msgLen = toInteger . length
 
 ping :: WebsocketInteraction Bool
 ping = do
