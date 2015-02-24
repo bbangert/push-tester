@@ -119,13 +119,13 @@ type WebsocketInteraction = ReaderT Config (StateT Storage IO)
 type TestInteraction = StateT TestConfig IO
 
 -- | Class that allows access to a Metric Sink
-class Monad m => HasSink m where
+class Monad m => MetricSink m where
     getSink :: m Metric.AnySink
 
-instance HasSink WebsocketInteraction where
+instance MetricSink WebsocketInteraction where
     getSink = iStat <$> ask
 
-instance HasSink TestInteraction where
+instance MetricSink TestInteraction where
     getSink = tcStatsd <$> get
 
 ----------------------------------------------------------------
@@ -187,12 +187,13 @@ getSetting name = do
 
 -- | Times an interaction and returns its result after sending the timer metric
 --   recorded over the supplied metric sink.
-withTimer :: ByteString             -- ^ Metric namespace
+withTimer :: (MetricSink m, MonadIO m)
+          => ByteString             -- ^ Metric namespace
           -> ByteString             -- ^ Metric bucket name
-          -> Metric.AnySink         -- ^ Metric sink to use
-          -> WebsocketInteraction a          -- ^ WebsocketInteraction to run
-          -> WebsocketInteraction a
-withTimer namespace bucket sink op = do
+          -> m a                    -- ^ Monad to run
+          -> m a
+withTimer namespace bucket op = do
+    sink <- getSink
     now <- liftIO getPOSIXTime
     opVal <- op
     done <- liftIO getPOSIXTime
@@ -204,7 +205,7 @@ withTimer namespace bucket sink op = do
     metricTimer = Metric.Timer namespace bucket
 
 -- | Send a counter increment
-incrementCounter :: (HasSink m, MonadIO m) =>
+incrementCounter :: (MetricSink m, MonadIO m) =>
                     ByteString      -- ^ Metric namespace
                  -> ByteString      -- ^ Metric bucket name
                  -> Integer         -- ^ Count to increment by
@@ -249,7 +250,7 @@ getEndpoint = fromJust . pushEndpoint
 
 -}
 
-assert :: (Show a, MonadIO m, HasSink m)
+assert :: (Show a, MonadIO m, MetricSink m)
        => (Bool, a)  -- ^ Condition that must be true, and an object to show
        -> String     -- ^ Error message to print
        -> String     -- ^ Counter to increment
@@ -260,7 +261,7 @@ assert (False, obj) msg cntr = do
     incrementCounter "push_test.assertfail" (BC.pack cntr) 1
     fail "Abort"
 
-assertStatus200 :: (MonadIO m, HasSink m) => Message -> m ()
+assertStatus200 :: (MonadIO m, MetricSink m) => Message -> m ()
 assertStatus200 msg = assert (msgStatus == 200, msg)
                       "message status not 200."
                       ("not200status." ++ statusMsg)
@@ -268,7 +269,7 @@ assertStatus200 msg = assert (msgStatus == 200, msg)
     statusMsg = show msgStatus
     msgStatus = fromJust $ status msg
 
-assertEndpointMatch :: (MonadIO m, HasSink m) => ChannelID -> Message -> m ()
+assertEndpointMatch :: (MonadIO m, MetricSink m) => ChannelID -> Message -> m ()
 assertEndpointMatch cid msg = do
     assert (length cids == 1, cids) "channel updates is longer than 1." "extra_updates"
     assert (updateCid == cid', (updateCid, cid')) "channel ID mismatch." "chan_id_mismatch"
@@ -316,8 +317,7 @@ ack msg = send ackMsg
 sendPushNotification :: (ChannelID, Endpoint) -> Notification -> WebsocketInteraction Message
 sendPushNotification (cid, endpoint) notif@Notification{..} = do
     sess <- iSession <$> ask
-    sink <- iStat <$> ask
-    msg <- withTimer "push_test.update" "latency" sink $ do
+    msg <- withTimer "push_test.update" "latency" $ do
             sendNotification sess endpoint notif
             getMessage
     incDataCounter notifData
