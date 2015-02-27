@@ -1,9 +1,9 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE RecordWildCards      #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
 
 module SimpleTest.Interact
     ( -- * TestInteraction type and commands
@@ -63,12 +63,13 @@ import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as BL
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, fromMaybe, isJust)
+import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Sequence              as S
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
 import qualified Network.WebSockets         as WS
 import           Network.Wreq               (FormParam ((:=)))
+import qualified Network.Wreq               as W
 import qualified Network.Wreq.Session       as Wreq
 import           Test.QuickCheck            (arbitrary, vectorOf)
 import           Test.QuickCheck.Gen        (Gen, choose, elements, generate)
@@ -307,7 +308,9 @@ unregister cid = sendRecieve unregisterMsg
 
 -- | Ack a notification
 ack :: Message -> WebsocketInteraction ()
-ack msg = send ackMsg
+ack msg = do
+    send ackMsg
+    incrementCounter "push_test.notification" "ack" 1
   where
     ackMsg = mkMessage {messageType="ack", updates=basicChans (updates msg)}
     -- Strip out the data from the ack
@@ -319,9 +322,11 @@ sendPushNotification (cid, endpoint) notif@Notification{..} = do
     sess <- iSession <$> ask
     msg <- withTimer "push_test.update" "latency" $ do
             sendNotification sess endpoint notif
+            incrementCounter "push_test.notification" "sent" 1
             getMessage
     incDataCounter notifData
     assertEndpointMatch cid msg
+    incrementCounter "push_test.notification" "received" 1
     return msg
   where
     incDataCounter Nothing = return ()
@@ -379,7 +384,7 @@ randomData len = liftIO $ generate $ vectorOf len hexChar
 
 -- | Send a PUT request to a notification point
 sendNotification :: MonadIO m => Wreq.Session -> String -> Notification -> m ()
-sendNotification sess ep notif = liftIO $ eatExceptions $ Wreq.put sess ep encNotif
+sendNotification sess ep notif = liftIO $ void $ Wreq.put sess ep encNotif
   where encNotif = serializeNotification notif
 
 -- | Serialize the notification to a bytestring for sending

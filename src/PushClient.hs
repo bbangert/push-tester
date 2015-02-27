@@ -12,7 +12,6 @@ module PushClient
     ) where
 
 --------------------------------------------------------------------------------
-import           Control.Monad      (void)
 import           Data.Aeson         (FromJSON, ToJSON, eitherDecode, encode,
                                      genericParseJSON, genericToJSON, parseJSON,
                                      toJSON)
@@ -21,6 +20,7 @@ import           Data.Aeson.Types   (defaultOptions, fieldLabelModifier,
 import           Data.Text          (Text)
 import           GHC.Generics
 import qualified Network.WebSockets as WS
+import           System.Timeout     (timeout)
 
 -- Generic Message construct for easy JSON encode/decode
 data Message = Message { messageType  :: !String
@@ -51,13 +51,20 @@ mkMessage = Message "" Nothing Nothing Nothing Nothing Nothing Nothing
 
 receiveMessage :: WS.ClientApp Message
 receiveMessage conn = do
-    d <- WS.receiveData conn
-    either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode d
+    d <- timeout (25*1000000) $ WS.receiveData conn
+    case d of
+        Nothing -> fail "Timeout waiting for data"
+        Just result ->
+            either (\e -> fail $ "Error decoding: " ++ e) return $ eitherDecode result
 
 sendReceiveMessage :: Message -> WS.ClientApp Message
 sendReceiveMessage msg conn = sendMessage msg conn >> receiveMessage conn
 
 sendMessage :: Message -> WS.ClientApp ()
-sendMessage msg conn = void $ WS.sendTextData conn eMsg
+sendMessage msg conn = do
+    result <- timeout (25*1000000) $ WS.sendTextData conn eMsg
+    case result of
+        Nothing -> fail "Timeout sending data"
+        Just _ -> return ()
   where
     eMsg = encode msg

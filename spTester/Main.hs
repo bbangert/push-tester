@@ -6,26 +6,29 @@
 
 module Main where
 
-import           Control.Applicative  ((<$>))
-import           Control.Arrow        (second)
-import           Control.Concurrent   (forkIO, runInUnboundThread)
-import qualified Control.Exception    as E
-import           Control.Monad        (forever, replicateM_, void, when)
+import           Control.Applicative     ((<$>))
+import           Control.Arrow           (second)
+import           Control.Concurrent      (forkIO, runInUnboundThread)
+import qualified Control.Exception       as E
+import           Control.Monad           (forever, replicateM_, void, when)
 import           Data.IORef
-import           Data.List.Split      (splitOn)
-import qualified Data.Map.Strict      as Map
-import           Data.Maybe           (fromJust, isJust, isNothing)
-import           Data.Sequence        ((|>))
-import qualified Data.Sequence        as S
-import qualified Network.Metric       as Metric
-import qualified Network.Wreq.Session as Wreq
-import           System.Environment   (getArgs)
-import           System.Posix.Env     (getEnv)
-import           Text.Printf          (printf)
+import           Data.List.Split         (splitOn)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromJust, isJust, isNothing)
+import           Data.Sequence           ((|>))
+import qualified Data.Sequence           as S
+import           Network.HTTP.Client     (Manager, ManagerSettings (..),
+                                          newManager)
+import           Network.HTTP.Client.TLS (tlsManagerSettings)
+import qualified Network.Metric          as Metric
+import qualified Network.Wreq.Session    as Wreq
+import           System.Environment      (getArgs)
+import           System.Posix.Env        (getEnv)
+import           Text.Printf             (printf)
 
-import           PushClient           (ChannelUpdate (..), Message (..))
+import           PushClient              (ChannelUpdate (..), Message (..))
 import           SimpleTest.Interact
-import           SimpleTest.Types     (Notification (..))
+import           SimpleTest.Types        (Notification (..))
 
 ----------------------------------------------------------------
 
@@ -41,7 +44,7 @@ defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
                                 ("PING_COUNT", 10),
                                 ("RECONNECT_DELAY", 5)]
 
-parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction ()))
+parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Manager))
 parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     let [sHostname, sPort] = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
@@ -52,7 +55,8 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     when (isNothing interaction) $ fail "Bad interaction lookup"
 
     sink <- Metric.open Metric.Statsd Nothing sHostname portNum
-    sess <- Wreq.withSession return
+    mgr <- newManager mgrSettings
+    sess <- Wreq.withSessionManager mgr return
 
     clientTracker <- newClientTracker maxC
     envSettings <- zip vars <$> mapM getEnv vars
@@ -61,7 +65,11 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
             map (second $ read . fromJust) $ filter (isJust . snd) envSettings
         settingsMap = Map.union actualSettings defaultSettings
         tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
-    return $ Just (tconfig, fromJust interaction)
+    return $ Just (tconfig, fromJust interaction, mgr)
+  where
+    mgrSettings = tlsManagerSettings { managerConnCount = 400
+                                     , managerResponseTimeout = Just (30*1000000)
+                                     }
 parseArguments _ = do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
@@ -72,18 +80,26 @@ watcher ClientTracker{..} spawn = forever $ do
     attempts <- readIORef attempting
     printf "Clients Connected: %s\n" (show attempts)
     let spawnCount = maxClients - attempts
+    when (spawnCount > 0) $
+        printf "Spinning up %s instances\n" (show spawnCount)
     incRef spawnCount attempting
     replicateM_ spawnCount spawn
     wait 5
 
-runTester :: (TestConfig, TestInteraction ()) -> IO ()
-runTester (tc@TC{..}, interaction) =
+runTester :: (TestConfig, TestInteraction (), Manager) -> IO ()
+runTester (tc@TC{..}, interaction, mgr) =
     runInUnboundThread $ watcher tcTracker spawn
   where
+    mgrSettings = tlsManagerSettings { managerConnCount = 1
+                                     , managerResponseTimeout = Just (10*1000000)
+                                     }
     att = attempting tcTracker
     dec = decRef att
-    spawn = void . forkIO . eatExceptions $ E.finally go dec
-    go = void $ runTestInteraction interaction tc
+    spawn = void . forkIO . void $ E.finally go dec
+    go = void $ do
+        sess <- Wreq.withSessionManager mgr return
+        let newTc = tc { tcSession = sess }
+        runTestInteraction interaction newTc
 
 ----------------------------------------------------------------
 

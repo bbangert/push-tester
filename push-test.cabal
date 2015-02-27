@@ -1,5 +1,5 @@
 name:                push-test
-version:             0.1
+version:             0.5
 license:             MPL-2.0
 license-file:        LICENSE
 author:              Ben Bangert
@@ -25,7 +25,7 @@ Library
           , containers      >= 0.5.0.0
           , bytestring      >= 0.10.0.2
           , lens            >= 4.1.2
-          , wreq            >= 0.1.0.1
+          , wreq            >= 0.3.0.1
           , dns             >= 1.0
           , iproute         >= 1.3.1
   hs-source-dirs:      src
@@ -55,8 +55,8 @@ Executable spTester
     , mtl           >= 2.1.3.1
     , text          >= 1.1.1.3
     , crypto-api    >= 0.12.2.2
-    , wreq          >= 0.2
-    , lens          == 4.4
+    , wreq          >= 0.3.0.1-ebe506cc25c5cc8bb452be6122bab01d9c750c95
+    , lens          >= 4.4
     , QuickCheck    >= 2.7.6
     , network-metrics >= 0.4
     , hostname      >= 1.0
@@ -66,7 +66,8 @@ Executable spTester
     , transformers  >= 0.4.2.0
     , unix          >= 2.7.0.1
     , http-client   >= 0.4.2.2
-    , http-types    >= 0.8.5
+    , http-client-tls >= 0.2.2
+    , http-types    == 0.8.5
 
 Test-suite pushclient-tests
   Type:           exitcode-stdio-1.0
@@ -89,4 +90,4 @@ Test-suite pushclient-tests
           , containers      >= 0.5.0.0
           , bytestring      >= 0.10.0.2
           , lens            >= 4.1.2
-          , wreq            >= 0.1.0.1
+          , wreq            >= 0.3.0.1
