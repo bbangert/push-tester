@@ -46,12 +46,12 @@ defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
                                 ("CONNECTION_COUNT", 10)]
 
 loadEnvSettings :: IO (Map.Map String Int)
-loadEnvSettings = do
-    envSettings <- zip vars <$> mapM getEnv vars
-    let actualSettings = Map.fromList $
-            map (second $ read . fromJust) $ filter (isJust . snd) envSettings
-    return $ Map.union actualSettings defaultSettings
+loadEnvSettings = mergedMap . filterValid . zip vars <$> mapM getEnv vars
   where
+    mergedMap lst = Map.union (convertedMap lst) defaultSettings
+    convertedMap lst = Map.fromList $ map convertSetting lst
+    convertSetting = second $ read . fromJust
+    filterValid = filter (isJust . snd)
     vars = Map.keys defaultSettings
 
 parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Manager))
