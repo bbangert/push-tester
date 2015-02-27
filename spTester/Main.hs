@@ -8,7 +8,8 @@ module Main where
 
 import           Control.Applicative     ((<$>))
 import           Control.Arrow           (second)
-import           Control.Concurrent      (forkIO, runInUnboundThread)
+import           Control.Concurrent      (forkIO, runInUnboundThread,
+                                          threadDelay)
 import qualified Control.Exception       as E
 import           Control.Monad           (forever, replicateM_, void, when)
 import           Data.IORef
@@ -95,7 +96,9 @@ watcher ClientTracker{..} atMost spawn = forever $ do
     when (spawnCount > 0) $
         printf "Spinning up %s instances\n" (show spawnCount)
     incRef spawnCount attempting
-    replicateM_ spawnCount spawn
+    replicateM_ spawnCount $ do
+        spawn
+        threadDelay 10000
     wait 5
 
 runTester :: (TestConfig, TestInteraction (), Manager) -> IO ()
