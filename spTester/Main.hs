@@ -43,7 +43,8 @@ defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
                                 ("PING_DELAY", 20),
                                 ("PING_COUNT", 10),
                                 ("RECONNECT_DELAY", 5),
-                                ("CONNECTION_COUNT", 10)]
+                                ("CONNECTION_COUNT", 10),
+                                ("LAUNCH_AT_ONCE", 1000)]
 
 loadEnvSettings :: IO (Map.Map String Int)
 loadEnvSettings = mergedMap . filterValid . zip vars <$> mapM getEnv vars
@@ -86,11 +87,11 @@ parseArguments _ = do
     return Nothing
 
 -- | Watches client tracking to echo data to stdout
-watcher :: ClientTracker -> IO () -> IO ()
-watcher ClientTracker{..} spawn = forever $ do
+watcher :: ClientTracker -> Int -> IO () -> IO ()
+watcher ClientTracker{..} atMost spawn = forever $ do
     attempts <- readIORef attempting
     printf "Clients Connected: %s\n" (show attempts)
-    let spawnCount = maxClients - attempts
+    let spawnCount = min (maxClients - attempts) atMost
     when (spawnCount > 0) $
         printf "Spinning up %s instances\n" (show spawnCount)
     incRef spawnCount attempting
@@ -99,8 +100,9 @@ watcher ClientTracker{..} spawn = forever $ do
 
 runTester :: (TestConfig, TestInteraction (), Manager) -> IO ()
 runTester (tc@TC{..}, interaction, mgr) =
-    runInUnboundThread $ watcher tcTracker spawn
+    runInUnboundThread $ watcher tcTracker atMost spawn
   where
+    atMost = tcSettings Map.! "LAUNCH_AT_ONCE"
     att = attempting tcTracker
     dec = decRef att
     spawn = void . forkIO . void $ E.finally go dec
