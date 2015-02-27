@@ -42,7 +42,17 @@ defaultSettings = Map.fromList [("NOTIFICATION_DELAY", 5),
                                 ("NOTIFICATION_MAX_SIZE", 4096),
                                 ("PING_DELAY", 20),
                                 ("PING_COUNT", 10),
-                                ("RECONNECT_DELAY", 5)]
+                                ("RECONNECT_DELAY", 5),
+                                ("CONNECTION_COUNT", 10)]
+
+loadEnvSettings :: IO (Map.Map String Int)
+loadEnvSettings = do
+    envSettings <- zip vars <$> mapM getEnv vars
+    let actualSettings = Map.fromList $
+            map (second $ read . fromJust) $ filter (isJust . snd) envSettings
+    return $ Map.union actualSettings defaultSettings
+  where
+    vars = Map.keys defaultSettings
 
 parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Manager))
 parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
@@ -50,21 +60,18 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
-        vars = Map.keys defaultSettings
 
     when (isNothing interaction) $ fail "Bad interaction lookup"
 
     sink <- Metric.open Metric.Statsd Nothing sHostname portNum
-    mgr <- newManager mgrSettings
-    sess <- Wreq.withSessionManager mgr return
+    sess <- Wreq.withSession return
 
     clientTracker <- newClientTracker maxC
-    envSettings <- zip vars <$> mapM getEnv vars
+    settingsMap <- loadEnvSettings
+    mgr <- newManager mgrSettings
 
-    let actualSettings = Map.fromList $
-            map (second $ read . fromJust) $ filter (isJust . snd) envSettings
-        settingsMap = Map.union actualSettings defaultSettings
-        tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
+    let tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
+
     return $ Just (tconfig, fromJust interaction, mgr)
   where
     mgrSettings = tlsManagerSettings { managerConnCount = 400
@@ -90,9 +97,6 @@ runTester :: (TestConfig, TestInteraction (), Manager) -> IO ()
 runTester (tc@TC{..}, interaction, mgr) =
     runInUnboundThread $ watcher tcTracker spawn
   where
-    mgrSettings = tlsManagerSettings { managerConnCount = 1
-                                     , managerResponseTimeout = Just (10*1000000)
-                                     }
     att = attempting tcTracker
     dec = decRef att
     spawn = void . forkIO . void $ E.finally go dec
