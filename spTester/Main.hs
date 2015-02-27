@@ -61,22 +61,26 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
 
+    -- Must specify an interaction
     when (isNothing interaction) $ fail "Bad interaction lookup"
 
+    -- Load the environment settings
+    settingsMap <- loadEnvSettings
+    let mgrSettings = tlsManagerSettings {
+          managerConnCount = settingsMap Map.! "CONNECTION_COUNT"
+        , managerResponseTimeout = Just (30*1000000)
+        }
+
+    -- Setup some common objects
     sink <- Metric.open Metric.Statsd Nothing sHostname portNum
     sess <- Wreq.withSession return
-
-    clientTracker <- newClientTracker maxC
-    settingsMap <- loadEnvSettings
     mgr <- newManager mgrSettings
+    clientTracker <- newClientTracker maxC
 
+    -- Create the main config object
     let tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
 
     return $ Just (tconfig, fromJust interaction, mgr)
-  where
-    mgrSettings = tlsManagerSettings { managerConnCount = 400
-                                     , managerResponseTimeout = Just (30*1000000)
-                                     }
 parseArguments _ = do
     putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
