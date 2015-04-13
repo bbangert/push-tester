@@ -67,10 +67,16 @@ import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Sequence              as S
 import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import qualified Network.Metric             as Metric
+import qualified Network.Socket             as S
 import qualified Network.WebSockets         as WS
+import qualified Network.WebSockets.Stream  as WS
 import           Network.Wreq               (FormParam ((:=)))
 import qualified Network.Wreq               as W
 import qualified Network.Wreq.Session       as Wreq
+import qualified OpenSSL                    as SSL
+import qualified OpenSSL.Session            as SSL
+import qualified System.IO.Streams          as Streams
+import qualified System.IO.Streams.SSL      as Streams
 import           Test.QuickCheck            (arbitrary, vectorOf)
 import           Test.QuickCheck.Gen        (Gen, choose, elements, generate)
 
@@ -106,6 +112,7 @@ data ClientTracker = ClientTracker
 data TestConfig = TC
     { tcHostip      :: String
     , tcPort        :: Int
+    , tcSecure      :: Bool
     , tcTracker     :: ClientTracker
     , tcInitStorage :: Storage
     , tcStatsd      :: Metric.AnySink
@@ -153,6 +160,30 @@ runWebsocketInteraction interaction config = runStateT (runReaderT interaction c
 runTestInteraction :: TestInteraction a -> TestConfig -> IO (a, TestConfig)
 runTestInteraction = runStateT
 
+makeClient :: Bool -> String -> Int -> WS.ClientApp a ->IO a
+makeClient True host port app = SSL.withOpenSSL $ do
+    ctx <- SSL.context
+    is  <- S.getAddrInfo Nothing (Just host) (Just $ show port)
+    let a = S.addrAddress $ head is
+        f = S.addrFamily $ head is
+    s <- S.socket f S.Stream S.defaultProtocol
+    S.connect s a
+    ssl <- SSL.connection ctx s
+    SSL.connect ssl
+    (i,o) <- Streams.sslToStreams ssl
+    stream <- WS.makeStream (Streams.read i)
+                (\b -> Streams.write (BL.toStrict <$> b) o)
+    WS.runClientWithStream stream host "/" WS.defaultConnectionOptions (originHeader host port) app
+  where
+    originHeader host port = [("Origin", BC.concat ["http://", BC.pack host,
+                                                    ":", BC.pack $ show port])]
+makeClient False host port app = WS.runClientWith host port "/"
+                                 WS.defaultConnectionOptions (originHeader host port) app
+  where
+    originHeader host port = [("Origin", BC.concat ["http://", BC.pack host,
+                                                    ":", BC.pack $ show port])]
+
+
 ----------------------------------------------------------------
 
 {-  * TestInteraction commands
@@ -163,16 +194,11 @@ runTestInteraction = runStateT
 withConnection :: WebsocketInteraction a -> TestInteraction a
 withConnection interaction = do
     tc@TC{..} <- get
-    let runClient = WS.runClientWith tcHostip tcPort "/"
-                    WS.defaultConnectionOptions (originHeader tcHostip tcPort)
-    (resp, store) <- liftIO $ runClient $ \conn -> do
+    (resp, store) <- liftIO $ makeClient tcSecure tcHostip tcPort $ \conn -> do
         let config = newConfig conn tcStatsd tcSession
         runWebsocketInteraction interaction config tcInitStorage
     put $ tc { tcInitStorage = store }
     return resp
-  where
-    originHeader host port = [("Origin", BC.concat ["http://", BC.pack host,
-                                                    ":", BC.pack $ show port])]
 
 -- | Get an env setting from the map
 getSetting :: String -> TestInteraction Int
@@ -198,8 +224,7 @@ withTimer namespace bucket op = do
     now <- liftIO getPOSIXTime
     opVal <- op
     done <- liftIO getPOSIXTime
-    let tDiff = realToFrac $ done - now
-        diff  = tDiff * 1000
+    let diff = fromIntegral $ round $ (done - now) * 1000
     liftIO $ eatExceptions $ Metric.push sink $ metricTimer diff
     return opVal
   where

@@ -57,11 +57,12 @@ loadEnvSettings = mergedMap . filterValid . zip vars <$> mapM getEnv vars
     vars = Map.keys defaultSettings
 
 parseArguments :: [String] -> IO (Maybe (TestConfig, TestInteraction (), Manager))
-parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
+parseArguments [ip, port, secure, spawnCount, strategy, statsdHost] = do
     let [sHostname, sPort] = splitOn ":" statsdHost
         portNum = fromInteger (read sPort :: Integer)
         maxC = read spawnCount
         interaction = Map.lookup strategy interactions
+        isSecure = secure == "true"
 
     -- Must specify an interaction
     when (isNothing interaction) $ fail "Bad interaction lookup"
@@ -80,11 +81,11 @@ parseArguments [ip, port, spawnCount, strategy, statsdHost] = do
     clientTracker <- newClientTracker maxC
 
     -- Create the main config object
-    let tconfig = TC ip (read port) clientTracker newStorage sink sess settingsMap
+    let tconfig = TC ip (read port) isSecure clientTracker newStorage sink sess settingsMap
 
     return $ Just (tconfig, fromJust interaction, mgr)
 parseArguments _ = do
-    putStrLn "Usage: spTester IP PORT SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
+    putStrLn "Usage: spTester IP PORT IS_SECURE SPAWN_COUNT [basic|ping|channels|reconnecter|datasender] STATSDHOST:STATSDPORT"
     return Nothing
 
 -- | Watches client tracking to echo data to stdout
