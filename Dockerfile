@@ -7,7 +7,7 @@ FROM phusion/baseimage:0.9.13
 MAINTAINER Ben Bangert <bbangert@mozilla.com>
 
 # Setup Haskell
-RUN apt-get update && apt-get install -yqq curl libgmp10 zlib1g-dev git wget
+RUN apt-get update && apt-get install -yqq curl libgmp10 zlib1g-dev git wget openssl libssl-dev
 
 WORKDIR /
 RUN wget https://www.haskell.org/platform/download/2014.2.0.0/haskell-platform-2014.2.0.0-unknown-linux-x86_64.tar.gz
@@ -41,5 +41,8 @@ RUN cp dist/build/spTester/spTester app/
 RUN mkdir -p app/libs
 RUN cp /usr/lib/x86_64-linux-gnu/libgmp.so.10* app/libs/
 RUN cp /usr/lib/x86_64-linux-gnu/librt.so* app/libs/
+RUN cp /lib/x86_64-linux-gnu/libssl.so* app/libs/
+RUN cp /lib/x86_64-linux-gnu/libcrypto.so* app/libs/
+RUN cp /lib/x86_64-linux-gnu/libz.so* app/libs/
 
 CMD docker build -t bbangert/simpletest /projects/simpletester/app
